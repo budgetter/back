@@ -1,7 +1,7 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
 
-const User = sequelize.define('User', {
+const Category = sequelize.define('Category', {
   id: {
     type: DataTypes.UUID,
     primaryKey: true,
@@ -11,19 +11,16 @@ const User = sequelize.define('User', {
     type: DataTypes.STRING,
     allowNull: false,
   },
-  email: {
-    type: DataTypes.STRING,
-    unique: true,
+  type: {
+    type: DataTypes.ENUM('expense', 'income'),
     allowNull: false,
   },
-  password: {
+  description: {
     type: DataTypes.STRING,
-    allowNull: false,
   },
-  // Additional profile fields can be added here.
 }, {
-  tableName: 'users',
+  tableName: 'categories',
   timestamps: true,
 });
 
-module.exports = User;
+module.exports = Category;

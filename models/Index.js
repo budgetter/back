@@ -1,31 +1,95 @@
-const User = require('./User');
-const Group = require('./Group');
-const Transaction = require('./Transaction');
-const Role = require('./Role');
-const UserGroup = require('./UserGroup');
-const Permission = require('./Permission');         // Optional
-const RolePermission = require('./RolePermission'); // Optional
+const User = require("./User");
+const Group = require("./Group");
+const Role = require("./Role");
+const UserGroup = require("./UserGroup");
+const Permission = require("./Permission");
+const RolePermission = require("./RolePermission");
+const Category = require("./Category");
+const Budget = require("./Budget");
+const BudgetCategoryPlan = require("./BudgetCategoryPlan");
+const Transaction = require("./Transaction");
+const RecurrentPayment = require("./RecurrentPayment");
+const Debt = require("./Debt");
 
-// User <-> Group association through UserGroup with a Role
-User.belongsToMany(Group, { through: UserGroup });
-Group.belongsToMany(User, { through: UserGroup });
+/* 
+   Users and Groups are linked via UserGroup, which includes a Role.
+   Foreign keys for User and Group will be added by the association.
+*/
+User.belongsToMany(Group, {
+  through: UserGroup,
+  foreignKey: "UserId",
+  otherKey: "GroupId",
+});
+Group.belongsToMany(User, {
+  through: UserGroup,
+  foreignKey: "GroupId",
+  otherKey: "UserId",
+});
 
-// Establish association for Role in the join table
-Role.hasMany(UserGroup, { foreignKey: 'roleId' });
-UserGroup.belongsTo(Role, { foreignKey: 'roleId' });
+// Link UserGroup to Role
+UserGroup.belongsTo(Role, { foreignKey: "roleId" });
+Role.hasMany(UserGroup, { foreignKey: "roleId" });
 
-// One-to-Many: Group -> Transaction
-Group.hasMany(Transaction);
-Transaction.belongsTo(Group);
-
-// One-to-Many: User -> Transaction
-User.hasMany(Transaction);
-Transaction.belongsTo(User);
-
-// (Optional) Role <-> Permission many-to-many association
+// Optional: Many-to-many between Role and Permission
 if (Permission && RolePermission) {
-  Role.belongsToMany(Permission, { through: RolePermission });
-  Permission.belongsToMany(Role, { through: RolePermission });
+  Role.belongsToMany(Permission, {
+    through: RolePermission,
+    foreignKey: "RoleId",
+    otherKey: "PermissionId",
+  });
+  Permission.belongsToMany(Role, {
+    through: RolePermission,
+    foreignKey: "PermissionId",
+    otherKey: "RoleId",
+  });
 }
 
-module.exports = { User, Group, Transaction, Role, UserGroup, Permission, RolePermission };
+// Budgeting associations
+Budget.hasMany(BudgetCategoryPlan, {
+  foreignKey: "budgetId",
+  onDelete: "CASCADE",
+});
+BudgetCategoryPlan.belongsTo(Budget, { foreignKey: "budgetId" });
+BudgetCategoryPlan.belongsTo(Category, { foreignKey: "categoryId" });
+Category.hasMany(BudgetCategoryPlan, { foreignKey: "categoryId" });
+
+// Transaction associations
+Transaction.belongsTo(Category, { foreignKey: "categoryId" });
+Category.hasMany(Transaction, { foreignKey: "categoryId" });
+Transaction.belongsTo(User, { foreignKey: "UserId" });
+User.hasMany(Transaction, { foreignKey: "UserId" });
+Transaction.belongsTo(Group, { foreignKey: "GroupId" });
+Group.hasMany(Transaction, { foreignKey: "GroupId" });
+Transaction.belongsTo(RecurrentPayment, { foreignKey: "recurrentPaymentId" });
+RecurrentPayment.hasMany(Transaction, { foreignKey: "recurrentPaymentId" });
+
+// RecurrentPayment associations
+RecurrentPayment.belongsTo(Category, { foreignKey: "categoryId" });
+Category.hasMany(RecurrentPayment, { foreignKey: "categoryId" });
+RecurrentPayment.belongsTo(User, { foreignKey: "UserId" });
+User.hasMany(RecurrentPayment, { foreignKey: "UserId" });
+RecurrentPayment.belongsTo(Group, { foreignKey: "GroupId" });
+Group.hasMany(RecurrentPayment, { foreignKey: "GroupId" });
+
+// Debt associations
+Debt.belongsTo(Category, { foreignKey: "categoryId" });
+Category.hasMany(Debt, { foreignKey: "categoryId" });
+Debt.belongsTo(User, { foreignKey: "UserId" });
+User.hasMany(Debt, { foreignKey: "UserId" });
+Debt.belongsTo(Group, { foreignKey: "GroupId" });
+Group.hasMany(Debt, { foreignKey: "GroupId" });
+
+module.exports = {
+  User,
+  Group,
+  Role,
+  UserGroup,
+  Permission,
+  RolePermission,
+  Category,
+  Budget,
+  BudgetCategoryPlan,
+  Transaction,
+  RecurrentPayment,
+  Debt,
+};

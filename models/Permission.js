@@ -15,6 +15,9 @@ const Permission = sequelize.define('Permission', {
   description: {
     type: DataTypes.STRING,
   },
+}, {
+  tableName: 'permissions',
+  timestamps: true,
 });
 
 module.exports = Permission;

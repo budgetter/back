@@ -1,23 +1,19 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
 
-const Role = sequelize.define('Role', {
+const BudgetCategoryPlan = sequelize.define('BudgetCategoryPlan', {
   id: {
     type: DataTypes.UUID,
     primaryKey: true,
     defaultValue: DataTypes.UUIDV4,
   },
-  name: {
-    type: DataTypes.STRING,
-    unique: true,
+  plannedAmount: {
+    type: DataTypes.DECIMAL(10, 2),
     allowNull: false,
   },
-  description: {
-    type: DataTypes.STRING,
-  },
 }, {
-  tableName: 'roles',
+  tableName: 'budget_category_plans',
   timestamps: true,
 });
 
-module.exports = Role;
+module.exports = BudgetCategoryPlan;

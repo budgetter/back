@@ -1,7 +1,7 @@
-const { DataTypes } = require("sequelize");
-const sequelize = require("../config/database");
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
 
-const Group = sequelize.define("Group", {
+const Group = sequelize.define('Group', {
   id: {
     type: DataTypes.UUID,
     primaryKey: true,
@@ -11,10 +11,10 @@ const Group = sequelize.define("Group", {
     type: DataTypes.STRING,
     allowNull: false,
   },
-  description: {
-    type: DataTypes.STRING,
-    allowNull: true,
-  },
+  // Additional fields if necessary.
+}, {
+  tableName: 'groups',
+  timestamps: true,
 });
 
 module.exports = Group;

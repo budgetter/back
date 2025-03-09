@@ -7,7 +7,10 @@ const RolePermission = sequelize.define('RolePermission', {
     primaryKey: true,
     defaultValue: DataTypes.UUIDV4,
   },
-  // Foreign keys for Role and Permission will be added via associations
+  // Foreign keys for Role and Permission will be added via associations.
+}, {
+  tableName: 'role_permissions',
+  timestamps: true,
 });
 
 module.exports = RolePermission;

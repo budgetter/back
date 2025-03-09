@@ -1,6 +1,8 @@
 const express = require("express");
 const bodyParser = require("body-parser");
 require("dotenv").config;
+const swaggerUi = require("swagger-ui-express");
+const swaggerDocs = require("./swagger");
 
 const sequelize = require("./config/database");
 require("./models");
@@ -10,8 +12,24 @@ const PORT = process.env.SERVER_PORT || 3000;
 
 app.use(bodyParser.json());
 
-const authRoutes = require('./routes/auth');
-app.use('/api/auth', authRoutes);
+// Serve Swagger docs
+app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerDocs));
+
+const authRoutes = require("./routes/auth");
+const userRoutes = require("./routes/users");
+const groupRoutes = require("./routes/groups");
+const budgetRoutes = require("./routes/budgets");
+const transactionRoutes = require("./routes/transactions");
+const recurrentPaymentRoutes = require("./routes/recurrentPayments");
+const debtRoutes = require("./routes/debts");
+
+app.use("/api/auth", authRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/groups", groupRoutes);
+app.use("/api/budgets", budgetRoutes);
+app.use("/api/transactions", transactionRoutes);
+app.use("/api/recurrent-payments", recurrentPaymentRoutes);
+app.use("/api/debts", debtRoutes);
 
 app.get("/", (req, res) => {
   res.send("API is running");
