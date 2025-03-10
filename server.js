@@ -1,4 +1,5 @@
 const express = require("express");
+const cors = require('cors');
 const bodyParser = require("body-parser");
 require("dotenv").config;
 const swaggerUi = require("swagger-ui-express");
@@ -7,10 +8,17 @@ const swaggerDocs = require("./swagger");
 const sequelize = require("./config/database");
 require("./models");
 
+const passport = require('./config/passport');
 const app = express();
 const PORT = process.env.SERVER_PORT || 3000;
 
+app.use(cors({
+  origin: 'http://localhost:5173',
+  credentials: true
+}));
+
 app.use(bodyParser.json());
+app.use(passport.initialize());
 
 // Serve Swagger docs
 app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerDocs));

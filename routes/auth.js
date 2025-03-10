@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const { register, login } = require('../controllers/authController');
+const passport = require('passport');
+const jwt = require('jsonwebtoken');
 
 /**
  * @swagger
@@ -53,5 +55,32 @@ router.post('/register', register);
  *         description: Unauthorized.
  */
 router.post('/login', login);
+
+/**
+ * Initiate Google OAuth login.
+ */
+router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+
+/**
+ * Google OAuth callback endpoint.
+ * We disable session support by setting { session: false } because we are using JWT.
+ * On success, a JWT token is generated and the user is redirected back to the front end.
+ */
+router.get(
+    '/google/callback',
+    passport.authenticate('google', { session: false, failureRedirect: '/login' }),
+    (req, res) => {
+      // Generate a JWT token for the authenticated user.
+      const token = jwt.sign(
+        { id: req.user.id, email: req.user.email },
+        process.env.JWT_SECRET,
+        { expiresIn: '1h' }
+      );
+      // Redirect back to the front end with the token as a query parameter.
+      res.redirect(`http://localhost:5173/login?token=${token}`);
+      // In production, update the URL to your front-end domain.
+    }
+  );
+
 
 module.exports = router;
