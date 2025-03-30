@@ -30,6 +30,9 @@ const budgetRoutes = require("./routes/budgets");
 const transactionRoutes = require("./routes/transactions");
 const recurrentPaymentRoutes = require("./routes/recurrentPayments");
 const debtRoutes = require("./routes/debts");
+const budgetSectionsRoutes = require('./routes/budgetSections');
+const budgetCategoryPlansRoutes = require('./routes/budgetCategoryPlans');
+const categoriesRoutes = require('./routes/categories');
 
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
@@ -38,6 +41,9 @@ app.use("/api/budgets", budgetRoutes);
 app.use("/api/transactions", transactionRoutes);
 app.use("/api/recurrent-payments", recurrentPaymentRoutes);
 app.use("/api/debts", debtRoutes);
+app.use('/api/budgets', budgetSectionsRoutes);
+app.use('/api/budgets', budgetCategoryPlansRoutes);
+app.use('/api/categories', categoriesRoutes);
 
 app.get("/", (req, res) => {
   res.send("API is running");

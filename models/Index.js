@@ -10,6 +10,7 @@ const BudgetCategoryPlan = require("./BudgetCategoryPlan");
 const Transaction = require("./Transaction");
 const RecurrentPayment = require("./RecurrentPayment");
 const Debt = require("./Debt");
+const BudgetSection = require("./BudgetSection");
 
 /* 
    Users and Groups are linked via UserGroup, which includes a Role.
@@ -53,6 +54,15 @@ BudgetCategoryPlan.belongsTo(Budget, { foreignKey: "budgetId" });
 BudgetCategoryPlan.belongsTo(Category, { foreignKey: "categoryId" });
 Category.hasMany(BudgetCategoryPlan, { foreignKey: "categoryId" });
 
+Budget.hasMany(BudgetSection, { foreignKey: "budgetId", onDelete: "CASCADE" });
+BudgetSection.belongsTo(Budget, { foreignKey: "budgetId" });
+
+BudgetSection.hasMany(BudgetCategoryPlan, {
+  foreignKey: "sectionId",
+  onDelete: "CASCADE",
+});
+BudgetCategoryPlan.belongsTo(BudgetSection, { foreignKey: "sectionId" });
+
 // Transaction associations
 Transaction.belongsTo(Category, { foreignKey: "categoryId" });
 Category.hasMany(Transaction, { foreignKey: "categoryId" });
@@ -88,6 +98,7 @@ module.exports = {
   RolePermission,
   Category,
   Budget,
+  BudgetSection,
   BudgetCategoryPlan,
   Transaction,
   RecurrentPayment,

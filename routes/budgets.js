@@ -1,7 +1,11 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const { authenticateToken } = require('../middlewares/authMiddleware');
-const budgetController = require('../controllers/budgetController');
+const { authenticateToken } = require("../middlewares/authMiddleware");
+const budgetController = require("../controllers/budgetController");
+
+router.get("/current", authenticateToken, budgetController.getCurrentBudget);
+
+router.get("/list", authenticateToken, budgetController.getBudgetList);
 
 /**
  * @swagger
@@ -27,7 +31,7 @@ const budgetController = require('../controllers/budgetController');
  *       400:
  *         description: Invalid input.
  */
-router.post('/', authenticateToken, budgetController.createBudget);
+router.post("/", authenticateToken, budgetController.createBudget);
 
 /**
  * @swagger
@@ -47,7 +51,7 @@ router.post('/', authenticateToken, budgetController.createBudget);
  *       404:
  *         description: Budget not found.
  */
-router.get('/:budgetId', authenticateToken, budgetController.getBudget);
+router.get("/:budgetId", authenticateToken, budgetController.getBudget);
 
 /**
  * @swagger
@@ -80,7 +84,7 @@ router.get('/:budgetId', authenticateToken, budgetController.getBudget);
  *       404:
  *         description: Budget not found.
  */
-router.put('/:budgetId', authenticateToken, budgetController.updateBudget);
+router.put("/:budgetId", authenticateToken, budgetController.updateBudget);
 
 /**
  * @swagger
@@ -100,6 +104,6 @@ router.put('/:budgetId', authenticateToken, budgetController.updateBudget);
  *       404:
  *         description: Budget not found.
  */
-router.delete('/:budgetId', authenticateToken, budgetController.deleteBudget);
+router.delete("/:budgetId", authenticateToken, budgetController.deleteBudget);
 
 module.exports = router;

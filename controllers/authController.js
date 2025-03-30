@@ -1,7 +1,26 @@
 const User = require("../models/User");
+const Budget = require("../models/Budget");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
+
+async function createDefaultBudget(userId) {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+
+  const startDate = new Date(year, month, 1, 0).toISOString().split("T")[0];
+  const endDate = new Date(year, month, 1, 0).toISOString().split("T")[0];
+
+  return Budget.create({
+    ownerType: "User",
+    ownerId: userId,
+    name: "Personal Budget",
+    totalBudget: 0,
+    startDate,
+    endDate,
+  });
+}
 
 // Register a new user
 const register = async (req, res) => {
@@ -22,6 +41,10 @@ const register = async (req, res) => {
       email,
       password: hashedPassword,
     });
+
+    // Create a default personal budget for the new user.
+    await createDefaultBudget(newUser.id);
+
     return res
       .status(201)
       .json({ message: "User registered successfully", userId: newUser.id });
