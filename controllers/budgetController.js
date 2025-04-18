@@ -1,6 +1,7 @@
 const Budget = require("../models/Budget");
 const BudgetSection = require("../models/BudgetSection");
 const BudgetCategoryPlan = require("../models/BudgetCategoryPlan");
+const Transaction = require("../models/Transaction");
 const sequelize = require("../config/database");
 const { Op } = require("sequelize");
 
@@ -139,6 +140,38 @@ async function getCurrentBudget(req, res) {
   }
 }
 
+async function getBudgetForMonth(req, res) {
+  const userId = req.user.id;
+  const { month } = req.query; // Expecting a month parameter
+
+  // Validate the month format (YYYY-MM)
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ message: "Invalid month format. Use YYYY-MM." });
+  }
+
+  const startDate = new Date(month + "-01").toISOString().split("T")[0]; // First day of the month
+  const endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0).toISOString().split("T")[0]; // Last day of the month
+  
+  try {
+    const budget = await Budget.findOne({
+      where: {
+        ownerType: "User",
+        ownerId: userId,
+        startDate: { [Op.lte]: startDate },
+        endDate: { [Op.gte]: endDate },
+      },
+      include: [{ model: BudgetSection, include: [BudgetCategoryPlan] }],
+    });
+    if (!budget) {
+      return res.status(404).json({ message: "No budget found for the selected month" });
+    }
+    return res.json(budget);
+  } catch (error) {
+    console.error("Error retrieving budget for month:", error);
+    return res.status(500).json({ message: "Server error retrieving budget for month" });
+  }
+}
+
 async function getBudgetList(req, res) {
   const userId = req.user.id;
   try {
@@ -158,6 +191,91 @@ async function getBudgetList(req, res) {
   }
 }
 
+async function getRemainingBudget(req, res) {
+  const userId = req.user.id;
+  const { month } = req.query; // Expecting a month parameter in YYYY-MM format
+
+  // Validate the month format
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ message: "Invalid month format. Use YYYY-MM." });
+  }
+
+  const startDate = new Date(month + "-01").toISOString().split("T")[0];
+  const endDate = new Date(new Date(startDate).getFullYear(), new Date(startDate).getMonth() + 1, 0).toISOString().split("T")[0];
+
+  try {
+    // Get the budget for the month
+    const budget = await Budget.findOne({
+      where: {
+        ownerType: "User",
+        ownerId: userId,
+        startDate: { [Op.lte]: startDate },
+        endDate: { [Op.gte]: endDate },
+      },
+      include: [{ 
+        model: BudgetSection,
+        include: [BudgetCategoryPlan]
+      }],
+    });
+
+    if (!budget) {
+      return res.status(404).json({ message: "No budget found for the selected month" });
+    }
+
+    // Get all transactions for the month
+    const transactions = await Transaction.findAll({
+      where: {
+        userId,
+        date: {
+          [Op.between]: [startDate, endDate]
+        }
+      },
+      attributes: [
+        'categoryId',
+        [sequelize.fn('SUM', sequelize.col('amount')), 'totalAmount']
+      ],
+      group: ['categoryId']
+    });
+
+    // Create a map of category totals
+    const categoryTotals = transactions.reduce((acc, trans) => {
+      acc[trans.categoryId] = parseFloat(trans.getDataValue('totalAmount') || 0);
+      return acc;
+    }, {});
+
+    // Calculate remaining amounts for each section and category
+    const sectionsWithRemaining = budget.BudgetSections.map(section => {
+      const categories = section.BudgetCategoryPlans.map(plan => {
+        const spent = categoryTotals[plan.categoryId] || 0;
+        const remaining = parseFloat(plan.plannedAmount) - spent;
+        const percentageUsed = (spent / parseFloat(plan.plannedAmount)) * 100;
+
+        return {
+          ...plan.toJSON(),
+          spent,
+          remaining,
+          percentageUsed: Math.min(Math.max(percentageUsed, 0), 100) // Ensure between 0-100
+        };
+      });
+
+      return {
+        ...section.toJSON(),
+        categories
+      };
+    });
+
+    return res.json({
+      budget: budget.toJSON(),
+      sections: sectionsWithRemaining,
+      month
+    });
+
+  } catch (error) {
+    console.error("Error calculating remaining budget:", error);
+    return res.status(500).json({ message: "Server error calculating remaining budget" });
+  }
+}
+
 module.exports = {
   createBudget,
   getBudget,
@@ -165,4 +283,6 @@ module.exports = {
   deleteBudget,
   getCurrentBudget,
   getBudgetList,
+  getBudgetForMonth,
+  getRemainingBudget
 };
