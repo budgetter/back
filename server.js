@@ -15,7 +15,7 @@ const PORT = process.env.SERVER_PORT || 3000;
 
 app.use(
   cors({
-    origin: process.env.VITE_API_URL,
+    origin: process.env.ORIGIN_URL,
     credentials: true,
   })
 );
