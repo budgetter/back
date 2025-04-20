@@ -4,7 +4,7 @@
   "main": "functions/api.js",
   "scripts": {
     "start": "netlify dev",
-    "build": "netlify-lambda build functions",
+    "build": "echo Building Functions",
     "test": "jest --runInBand"
   },
   "dependencies": {

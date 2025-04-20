@@ -13,7 +13,7 @@
   directory = "functions"
   node_bundler = "esbuild"
   included_files = ["config/**", "models/**", "routes/**", "middlewares/**"]
-  external_node_modules = ["mysql2"]
+  external_node_modules = ["mysql2","express"]
 
 [[redirects]]
   from = "/api/*"
