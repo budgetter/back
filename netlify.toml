@@ -1,0 +1,30 @@
+[build]
+  command = "npm install && npm run build"
+  functions = "functions-build"
+  publish = "public"
+
+[dev]
+  port = 8888
+  publish = "public"
+  functions = "functions"
+  targetPort = 3000
+
+[functions]
+  directory = "functions"
+  node_bundler = "esbuild"
+  included_files = ["config/**", "models/**", "routes/**", "middlewares/**"]
+  external_node_modules = ["mysql2"]
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true
+
+[[headers]]
+  for = "/api/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Headers = "Content-Type, Authorization"
+    Access-Control-Allow-Methods = "GET, POST, PUT, DELETE, OPTIONS"
+    Access-Control-Allow-Credentials = "true" 
