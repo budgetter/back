@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
 require("dotenv").config();
+
 const serverless = require("serverless-http");
 
 const sequelize = require("./config/database");
@@ -46,27 +47,23 @@ const budgetSectionsRoutes = require("./routes/budgetSections");
 const budgetCategoryPlansRoutes = require("./routes/budgetCategoryPlans");
 const categoriesRoutes = require("./routes/categories");
 
-app.use("/.netlify/functions/api/auth", authRoutes);
-app.use("/.netlify/functions/api/users", userRoutes);
-app.use("/.netlify/functions/api/groups", groupRoutes);
-app.use("/.netlify/functions/api/budgets", budgetRoutes);
-app.use("/.netlify/functions/api/transactions", transactionRoutes);
-app.use("/.netlify/functions/api/recurrent-payments", recurrentPaymentRoutes);
-app.use("/.netlify/functions/api/debts", debtRoutes);
-app.use("/.netlify/functions/api/budgets", budgetSectionsRoutes);
-app.use("/.netlify/functions/api/budgets", budgetCategoryPlansRoutes);
-app.use("/.netlify/functions/api/categories", categoriesRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/groups", groupRoutes);
+app.use("/api/budgets", budgetRoutes);
+app.use("/api/transactions", transactionRoutes);
+app.use("/api/recurrent-payments", recurrentPaymentRoutes);
+app.use("/api/debts", debtRoutes);
+app.use("/api/budgets", budgetSectionsRoutes);
+app.use("/api/budgets", budgetCategoryPlansRoutes);
+app.use("/api/categories", categoriesRoutes);
 
-app.get("/.netlify/functions/api/", (req, res) => {
+app.get("/api/", (req, res) => {
   res.status(200).send("API is running");
 });
 
-app.get("/.netlify/functions/api/test", (req, res) => {
-  console.log("Test endpoint hit");
-  return res.status(200).json({ message: "Test endpoint working" });
-});
 
-// Initialize database connection with timeout handling
+// Initialize database connection once on startup
 const initializeDatabase = async () => {
   try {
     await sequelize.authenticate();
@@ -83,35 +80,8 @@ const initializeDatabase = async () => {
   }
 };
 
-// Create the serverless handler
-const serverlessHandler = serverless(app, {
-  binary: ["image/*", "application/json"],
-  response: {
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Credentials": true,
-    },
-  },
-});
+// Immediately initialize database connection on startup
+initializeDatabase();
 
-// Wrap the handler with database connection management
-const handler = async (event, context) => {
-  // Initialize database connection for this invocation
-  await initializeDatabase();
-
-  // Execute the request
-  const result = await serverlessHandler(event, context);
-
-  // Ensure the response is properly formatted
-  if (!result) {
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: "No response from handler" }),
-    };
-  }
-
-  return result;
-};
-
-// Export the handler
-module.exports.handler = handler;
+// Export the Express app directly
+module.exports = app;
