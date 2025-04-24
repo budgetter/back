@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "functions/api.js",
   "scripts": {
-    "start": "node functions/api.js",
+    "start": "npx netlify dev",
     "build": "echo Building Functions",
     "test": "jest --runInBand"
   },
