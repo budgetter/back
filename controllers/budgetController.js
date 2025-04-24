@@ -150,7 +150,7 @@ async function getBudgetForMonth(req, res) {
   }
 
   const startDate = new Date(month + "-01").toISOString().split("T")[0]; // First day of the month
-  const endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0).toISOString().split("T")[0]; // Last day of the month
+  const endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 2, 0).toISOString().split("T")[0]; // Last day of the month
   
   try {
     const budget = await Budget.findOne({
@@ -201,7 +201,7 @@ async function getRemainingBudget(req, res) {
   }
 
   const startDate = new Date(month + "-01").toISOString().split("T")[0];
-  const endDate = new Date(new Date(startDate).getFullYear(), new Date(startDate).getMonth() + 1, 0).toISOString().split("T")[0];
+  const endDate = new Date(new Date(startDate).getFullYear(), new Date(startDate).getMonth() + 2, 0).toISOString().split("T")[0];
 
   try {
     // Get the budget for the month
@@ -243,6 +243,22 @@ async function getRemainingBudget(req, res) {
       return acc;
     }, {});
 
+    // Collect all categoryIds from budget plans
+    const budgetCategoryIds = new Set();
+    budget.BudgetSections.forEach(section => {
+      section.BudgetCategoryPlans.forEach(plan => {
+        budgetCategoryIds.add(plan.categoryId);
+      });
+    });
+
+    // Calculate unknown spent amount for transactions with categoryId not in budgetCategoryIds
+    let unknownSpent = 0;
+    for (const trans of transactions) {
+      if (!budgetCategoryIds.has(trans.categoryId)) {
+        unknownSpent += parseFloat(trans.getDataValue('totalAmount') || 0);
+      }
+    }
+
     // Calculate remaining amounts for each section and category
     const sectionsWithRemaining = budget.BudgetSections.map(section => {
       const categories = section.BudgetCategoryPlans.map(plan => {
@@ -263,6 +279,23 @@ async function getRemainingBudget(req, res) {
         categories
       };
     });
+
+    // Add an "Unknown" category section if unknownSpent > 0
+    if (unknownSpent > 0) {
+      sectionsWithRemaining.push({
+        id: "unknown",
+        name: "Unknown",
+        categories: [{
+          id: "unknown",
+          categoryId: "unknown",
+          name: "Unknown",
+          plannedAmount: 0,
+          spent: unknownSpent,
+          remaining: -unknownSpent,
+          percentageUsed: 100,
+        }]
+      });
+    }
 
     return res.json({
       budget: budget.toJSON(),
