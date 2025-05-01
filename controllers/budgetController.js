@@ -142,11 +142,13 @@ async function getCurrentBudget(req, res) {
 
 async function getBudgetForMonth(req, res) {
   const userId = req.user.id;
-  const { month } = req.query; // Expecting a month parameter
+  const { month } = req.query;
 
   // Validate the month format (YYYY-MM)
   if (!/^\d{4}-\d{2}$/.test(month)) {
-    return res.status(400).json({ message: "Invalid month format. Use YYYY-MM." });
+    return res
+      .status(400)
+      .json({ message: "Invalid month format. Use YYYY-MM." });
   }
 
   const startDate = new Date(month + "-01").toISOString().split("T")[0]; // First day of the month
@@ -209,7 +211,7 @@ async function getRemainingBudget(req, res) {
   const startDate = new Date(month + "-01").toISOString().split("T")[0];
   const endDate = new Date(
     new Date(startDate).getFullYear(),
-    new Date(startDate).getMonth() + 1,
+    new Date(startDate).getMonth() + 2,
     0
   )
     .toISOString()
@@ -275,10 +277,10 @@ async function getRemainingBudget(req, res) {
     let unknownSpent = 0;
     for (const trans of transactions) {
       if (!budgetCategoryIds.has(trans.categoryId)) {
-        unknownSpent += parseFloat(trans.getDataValue('totalAmount') || 0);
+        unknownSpent += parseFloat(trans.getDataValue("totalAmount") || 0);
       }
     }
-    
+
     // Categories from transactions not in budget plans
     const extraCategoryIds = Object.keys(categoryTotals).filter(
       (catId) => !budgetCategoryIds.has(catId)
@@ -286,8 +288,13 @@ async function getRemainingBudget(req, res) {
     // Prepare extra categories data
     const extraCategories = [];
     if (extraCategoryIds.length > 0) {
+      // Convert BudgetSections to plain objects
+      const budgetSectionsPlain = budget.BudgetSections.map((section) =>
+        section.get ? section.get({ plain: true }) : section
+      );
+
       // Find or create "General" section in memory
-      let generalSection = budget.BudgetSections.find(
+      let generalSection = budgetSectionsPlain.find(
         (s) => s.name === "General"
       );
       if (!generalSection) {
@@ -295,8 +302,8 @@ async function getRemainingBudget(req, res) {
           id: "general",
           name: "General",
           BudgetCategoryPlans: [],
-          toJSON: () => ({ id: "general", name: "General" }),
         };
+        budgetSectionsPlain.push(generalSection);
       }
 
       for (const catId of extraCategoryIds) {
@@ -315,10 +322,8 @@ async function getRemainingBudget(req, res) {
       generalSection.BudgetCategoryPlans =
         generalSection.BudgetCategoryPlans.concat(extraCategories);
 
-      // Add general section to sections if it was newly created
-      if (!budget.BudgetSections.find((s) => s.name === "General")) {
-        budget.BudgetSections.push(generalSection);
-      }
+      // Replace budget.BudgetSections with plain objects including general section
+      budget.BudgetSections = budgetSectionsPlain;
     }
 
     // Calculate remaining amounts for each section and category
@@ -331,9 +336,9 @@ async function getRemainingBudget(req, res) {
             ? (spent / parseFloat(plan.plannedAmount)) * 100
             : 100;
 
-        // Use toJSON if available, else use plan as is
+        // Use toJSON if available and plan is a Sequelize instance, else use plan as is
         const planData =
-          typeof plan.toJSON === "function" ? plan.toJSON() : plan;
+          plan && typeof plan.toJSON === "function" ? plan.toJSON() : plan;
 
         return {
           ...planData,
@@ -343,9 +348,9 @@ async function getRemainingBudget(req, res) {
         };
       });
 
-      // Use toJSON if available, else use section as is
+      // Use toJSON if available and section is a Sequelize instance, else use section as is
       const sectionData =
-        typeof section.toJSON === "function" ? section.toJSON() : section;
+        section && typeof section.toJSON === "function" ? section.toJSON() : section;
 
       return {
         ...sectionData,
@@ -358,15 +363,23 @@ async function getRemainingBudget(req, res) {
       sectionsWithRemaining.push({
         id: "unknown",
         name: "Unknown",
-        categories: [{
-          id: "unknown",
-          categoryId: "unknown",
-          name: "Unknown",
-          plannedAmount: 0,
-          spent: unknownSpent,
-          remaining: -unknownSpent,
-          percentageUsed: 100,
-        }]
+        categories: [
+          {
+            id: "unknown",
+            categoryId: "unknown",
+            name: "Unknown",
+            plannedAmount: 0,
+            spent: unknownSpent,
+            remaining: -unknownSpent,
+            percentageUsed: 100,
+            toJSON() {
+              return this;
+            },
+          },
+        ],
+        toJSON() {
+          return this;
+        },
       });
     }
 
