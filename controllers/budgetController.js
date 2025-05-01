@@ -152,7 +152,9 @@ async function getBudgetForMonth(req, res) {
   }
 
   const startDate = new Date(month + "-01").toISOString().split("T")[0]; // First day of the month
-  const endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 2, 0).toISOString().split("T")[0]; // Last day of the month
+  const endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 2, 0)
+    .toISOString()
+    .split("T")[0]; // Last day of the month
 
   try {
     const budget = await Budget.findOne({
@@ -295,12 +297,12 @@ async function getRemainingBudget(req, res) {
 
       // Find or create "General" section in memory
       let generalSection = budgetSectionsPlain.find(
-        (s) => s.name === "General"
+        (s) => s.name === "Not Planned"
       );
       if (!generalSection) {
         generalSection = {
-          id: "general",
-          name: "General",
+          id: "noPlanned",
+          name: "Not Planned",
           BudgetCategoryPlans: [],
         };
         budgetSectionsPlain.push(generalSection);
@@ -311,10 +313,10 @@ async function getRemainingBudget(req, res) {
           id: `extra-${catId}`,
           categoryId: catId,
           name: "Unknown Category", // Frontend can replace with actual category name
-          plannedAmount: categoryTotals[catId], // Set plannedAmount to spent amount
+          plannedAmount: 0,
           spent: categoryTotals[catId],
-          remaining: 0,
-          percentageUsed: 0,
+          remaining: -categoryTotals[catId],
+          percentageUsed: 100,
         });
       }
 
@@ -350,7 +352,9 @@ async function getRemainingBudget(req, res) {
 
       // Use toJSON if available and section is a Sequelize instance, else use section as is
       const sectionData =
-        section && typeof section.toJSON === "function" ? section.toJSON() : section;
+        section && typeof section.toJSON === "function"
+          ? section.toJSON()
+          : section;
 
       return {
         ...sectionData,
@@ -359,29 +363,29 @@ async function getRemainingBudget(req, res) {
     });
 
     // Add an "Unknown" category section if unknownSpent > 0
-    if (unknownSpent > 0) {
-      sectionsWithRemaining.push({
-        id: "unknown",
-        name: "Unknown",
-        categories: [
-          {
-            id: "unknown",
-            categoryId: "unknown",
-            name: "Unknown",
-            plannedAmount: 0,
-            spent: unknownSpent,
-            remaining: -unknownSpent,
-            percentageUsed: 100,
-            toJSON() {
-              return this;
-            },
-          },
-        ],
-        toJSON() {
-          return this;
-        },
-      });
-    }
+    // if (unknownSpent > 0) {
+    //   sectionsWithRemaining.push({
+    //     id: "unknown",
+    //     name: "Unknown",
+    //     categories: [
+    //       {
+    //         id: "unknown",
+    //         categoryId: "unknown",
+    //         name: "Unknown",
+    //         plannedAmount: 0,
+    //         spent: unknownSpent,
+    //         remaining: -unknownSpent,
+    //         percentageUsed: 100,
+    //         toJSON() {
+    //           return this;
+    //         },
+    //       },
+    //     ],
+    //     toJSON() {
+    //       return this;
+    //     },
+    //   });
+    // }
 
     return res.json({
       budget: budget.toJSON(),
