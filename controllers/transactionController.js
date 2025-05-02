@@ -1,4 +1,5 @@
 const Transaction = require('../models/Transaction');
+const { v4: uuidv4 } = require('uuid');
 
 /**
  * Create a new transaction.
@@ -10,6 +11,7 @@ async function createTransaction(req, res) {
   }
   try {
     const transaction = await Transaction.create({
+      id: uuidv4(),
       amount,
       description,
       date: date || new Date(),
@@ -25,6 +27,7 @@ async function createTransaction(req, res) {
     return res.status(500).json({ message: 'Server error while creating transaction' });
   }
 }
+
 
 /**
  * Retrieve transactions for a specific group with pagination.

@@ -23,4 +23,6 @@ router.put("/:budgetId", authenticateToken, budgetController.updateBudget);
 
 router.delete("/:budgetId", authenticateToken, budgetController.deleteBudget);
 
+router.post("/default", authenticateToken, budgetController.createDefaultBudget);
+
 module.exports = router;

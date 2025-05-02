@@ -3,7 +3,7 @@
 const { v4: uuidv4 } = require("uuid");
 
 module.exports = {
-  async up(queryInterface) {
+  async up(queryInterface, Sequelize) {
     // List of default categories with associated icon names (React Icons).
     const categories = [
       {
@@ -69,10 +69,26 @@ module.exports = {
         createdAt: new Date(),
         updatedAt: new Date(),
       },
-      // Add more categories as needed...
     ];
 
-    await queryInterface.bulkInsert("categories", categories, {});
+    // Check existing categories by name to avoid duplicates
+    const existingCategories = await queryInterface.sequelize.query(
+      "SELECT name FROM categories WHERE name IN (:names)",
+      {
+        replacements: { names: categories.map((c) => c.name) },
+        type: Sequelize.QueryTypes.SELECT,
+      }
+    );
+
+    const existingNames = existingCategories.map((c) => c.name);
+
+    const newCategories = categories.filter(
+      (c) => !existingNames.includes(c.name)
+    );
+
+    if (newCategories.length > 0) {
+      await queryInterface.bulkInsert("categories", newCategories, {});
+    }
   },
 
   async down(queryInterface) {

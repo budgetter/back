@@ -142,16 +142,20 @@ async function getCurrentBudget(req, res) {
 
 async function getBudgetForMonth(req, res) {
   const userId = req.user.id;
-  const { month } = req.query; // Expecting a month parameter
+  const { month } = req.query;
 
   // Validate the month format (YYYY-MM)
   if (!/^\d{4}-\d{2}$/.test(month)) {
-    return res.status(400).json({ message: "Invalid month format. Use YYYY-MM." });
+    return res
+      .status(400)
+      .json({ message: "Invalid month format. Use YYYY-MM." });
   }
 
   const startDate = new Date(month + "-01").toISOString().split("T")[0]; // First day of the month
-  const endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0).toISOString().split("T")[0]; // Last day of the month
-  
+  const endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 2, 0)
+    .toISOString()
+    .split("T")[0]; // Last day of the month
+
   try {
     const budget = await Budget.findOne({
       where: {
@@ -163,12 +167,16 @@ async function getBudgetForMonth(req, res) {
       include: [{ model: BudgetSection, include: [BudgetCategoryPlan] }],
     });
     if (!budget) {
-      return res.status(404).json({ message: "No budget found for the selected month" });
+      return res
+        .status(404)
+        .json({ message: "No budget found for the selected month" });
     }
     return res.json(budget);
   } catch (error) {
     console.error("Error retrieving budget for month:", error);
-    return res.status(500).json({ message: "Server error retrieving budget for month" });
+    return res
+      .status(500)
+      .json({ message: "Server error retrieving budget for month" });
   }
 }
 
@@ -197,11 +205,19 @@ async function getRemainingBudget(req, res) {
 
   // Validate the month format
   if (!/^\d{4}-\d{2}$/.test(month)) {
-    return res.status(400).json({ message: "Invalid month format. Use YYYY-MM." });
+    return res
+      .status(400)
+      .json({ message: "Invalid month format. Use YYYY-MM." });
   }
 
   const startDate = new Date(month + "-01").toISOString().split("T")[0];
-  const endDate = new Date(new Date(startDate).getFullYear(), new Date(startDate).getMonth() + 1, 0).toISOString().split("T")[0];
+  const endDate = new Date(
+    new Date(startDate).getFullYear(),
+    new Date(startDate).getMonth() + 2,
+    0
+  )
+    .toISOString()
+    .split("T")[0];
 
   try {
     // Get the budget for the month
@@ -212,67 +228,193 @@ async function getRemainingBudget(req, res) {
         startDate: { [Op.lte]: startDate },
         endDate: { [Op.gte]: endDate },
       },
-      include: [{ 
-        model: BudgetSection,
-        include: [BudgetCategoryPlan]
-      }],
+      include: [
+        {
+          model: BudgetSection,
+          include: [BudgetCategoryPlan],
+        },
+      ],
     });
 
     if (!budget) {
-      return res.status(404).json({ message: "No budget found for the selected month" });
+      return res
+        .status(404)
+        .json({ message: "No budget found for the selected month" });
     }
 
     // Get all transactions for the month
     const transactions = await Transaction.findAll({
       where: {
-        userId,
+        UserId: userId,
         date: {
-          [Op.between]: [startDate, endDate]
-        }
+          [Op.between]: [startDate, endDate],
+        },
       },
       attributes: [
-        'categoryId',
-        [sequelize.fn('SUM', sequelize.col('amount')), 'totalAmount']
+        "categoryId",
+        [sequelize.fn("SUM", sequelize.col("amount")), "totalAmount"],
       ],
-      group: ['categoryId']
+      group: ["categoryId"],
     });
 
     // Create a map of category totals
     const categoryTotals = transactions.reduce((acc, trans) => {
-      acc[trans.categoryId] = parseFloat(trans.getDataValue('totalAmount') || 0);
+      acc[trans.categoryId] = parseFloat(
+        trans.getDataValue("totalAmount") || 0
+      );
       return acc;
     }, {});
 
+    // Collect all categoryIds from budget plans
+    const budgetCategoryIds = new Set();
+    budget.BudgetSections.forEach((section) => {
+      section.BudgetCategoryPlans.forEach((plan) => {
+        budgetCategoryIds.add(plan.categoryId);
+      });
+    });
+
+    console.log("Budget Category IDs:", Array.from(budgetCategoryIds));
+    console.log("Transaction Category IDs:", Object.keys(categoryTotals));
+
+    let unknownSpent = 0;
+    for (const trans of transactions) {
+      if (!budgetCategoryIds.has(trans.categoryId)) {
+        unknownSpent += parseFloat(trans.getDataValue("totalAmount") || 0);
+      }
+    }
+
+    // Categories from transactions not in budget plans
+    const extraCategoryIds = Object.keys(categoryTotals).filter(
+      (catId) => !budgetCategoryIds.has(catId)
+    );
+    // Prepare extra categories data
+    const extraCategories = [];
+    if (extraCategoryIds.length > 0) {
+      // Convert BudgetSections to plain objects
+      const budgetSectionsPlain = budget.BudgetSections.map((section) =>
+        section.get ? section.get({ plain: true }) : section
+      );
+
+      // Find or create "General" section in memory
+      let generalSection = budgetSectionsPlain.find(
+        (s) => s.name === "Not Planned"
+      );
+      if (!generalSection) {
+        generalSection = {
+          id: "noPlanned",
+          name: "Not Planned",
+          BudgetCategoryPlans: [],
+        };
+        budgetSectionsPlain.push(generalSection);
+      }
+
+      for (const catId of extraCategoryIds) {
+        extraCategories.push({
+          id: `extra-${catId}`,
+          categoryId: catId,
+          name: "Unknown Category", // Frontend can replace with actual category name
+          plannedAmount: 0,
+          spent: categoryTotals[catId],
+          remaining: -categoryTotals[catId],
+          percentageUsed: 100,
+        });
+      }
+
+      // Add extra categories to general section
+      generalSection.BudgetCategoryPlans =
+        generalSection.BudgetCategoryPlans.concat(extraCategories);
+
+      // Replace budget.BudgetSections with plain objects including general section
+      budget.BudgetSections = budgetSectionsPlain;
+    }
+
     // Calculate remaining amounts for each section and category
-    const sectionsWithRemaining = budget.BudgetSections.map(section => {
-      const categories = section.BudgetCategoryPlans.map(plan => {
+    const sectionsWithRemaining = budget.BudgetSections.map((section) => {
+      const categories = section.BudgetCategoryPlans.map((plan) => {
         const spent = categoryTotals[plan.categoryId] || 0;
         const remaining = parseFloat(plan.plannedAmount) - spent;
-        const percentageUsed = (spent / parseFloat(plan.plannedAmount)) * 100;
+        const percentageUsed =
+          plan.plannedAmount > 0
+            ? (spent / parseFloat(plan.plannedAmount)) * 100
+            : 100;
+
+        // Use toJSON if available and plan is a Sequelize instance, else use plan as is
+        const planData =
+          plan && typeof plan.toJSON === "function" ? plan.toJSON() : plan;
 
         return {
-          ...plan.toJSON(),
+          ...planData,
           spent,
           remaining,
-          percentageUsed: Math.min(Math.max(percentageUsed, 0), 100) // Ensure between 0-100
+          percentageUsed: Math.min(Math.max(percentageUsed, 0), 100), // Ensure between 0-100
         };
       });
 
+      // Use toJSON if available and section is a Sequelize instance, else use section as is
+      const sectionData =
+        section && typeof section.toJSON === "function"
+          ? section.toJSON()
+          : section;
+
       return {
-        ...section.toJSON(),
-        categories
+        ...sectionData,
+        categories,
       };
     });
+
+    // Add an "Unknown" category section if unknownSpent > 0
+    // if (unknownSpent > 0) {
+    //   sectionsWithRemaining.push({
+    //     id: "unknown",
+    //     name: "Unknown",
+    //     categories: [
+    //       {
+    //         id: "unknown",
+    //         categoryId: "unknown",
+    //         name: "Unknown",
+    //         plannedAmount: 0,
+    //         spent: unknownSpent,
+    //         remaining: -unknownSpent,
+    //         percentageUsed: 100,
+    //         toJSON() {
+    //           return this;
+    //         },
+    //       },
+    //     ],
+    //     toJSON() {
+    //       return this;
+    //     },
+    //   });
+    // }
 
     return res.json({
       budget: budget.toJSON(),
       sections: sectionsWithRemaining,
-      month
+      month,
     });
-
   } catch (error) {
     console.error("Error calculating remaining budget:", error);
-    return res.status(500).json({ message: "Server error calculating remaining budget" });
+    return res
+      .status(500)
+      .json({ message: "Server error calculating remaining budget" });
+  }
+}
+
+const BudgetService = require("../functions/budgetService");
+
+async function createDefaultBudget(req, res) {
+  const userId = req.user.id;
+  try {
+    const budget = await BudgetService.createDefaultBudget(userId);
+    return res.status(201).json({
+      message: "Default budget created successfully",
+      budget,
+    });
+  } catch (error) {
+    console.error("Error creating default budget:", error);
+    return res
+      .status(500)
+      .json({ message: "Server error while creating default budget" });
   }
 }
 
@@ -284,5 +426,6 @@ module.exports = {
   getCurrentBudget,
   getBudgetList,
   getBudgetForMonth,
-  getRemainingBudget
+  getRemainingBudget,
+  createDefaultBudget,
 };
