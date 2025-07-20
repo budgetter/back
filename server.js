@@ -72,7 +72,23 @@ const initializeDatabase = async () => {
 
     // Only run migrations and seeders in development
     if (process.env.NODE_ENV === "development") {
-      await sequelize.sync({ alter: true });
+      const { exec } = require("child_process");
+      // Run migrations using sequelize-cli
+      await new Promise((resolve, reject) => {
+        exec("npx sequelize-cli db:migrate", (error, stdout, stderr) => {
+          if (error) {
+            console.error(`Migration error: ${error.message}`);
+            reject(error);
+            return;
+          }
+          if (stderr) {
+            console.error(`Migration stderr: ${stderr}`);
+          }
+          console.log(`Migration stdout: ${stdout}`);
+          resolve();
+        });
+      });
+      // Run seeders
       await defaultCategoriesSeeder.up(sequelize.getQueryInterface());
       console.log("Default categories seeded successfully.");
     }
