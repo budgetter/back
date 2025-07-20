@@ -41,4 +41,11 @@ const Budget = sequelize.define(
   }
 );
 
+Budget.associate = (models) => {
+  Budget.hasMany(models.BudgetSection, {
+    foreignKey: "budgetId",
+    as: "sections",
+  });
+};
+
 module.exports = Budget;

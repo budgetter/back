@@ -1,5 +1,5 @@
 [build]
-  command = "npm install && npm run build"
+  command = "npm install && npx sequelize-cli db:migrate && npm run build"
   functions = "functions-build"
   publish = "public"
 

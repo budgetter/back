@@ -1,18 +1,11 @@
 const express = require("express");
 const router = express.Router();
-const { authenticateToken } = require("../middlewares/authMiddleware");
 const debtController = require("../controllers/debtController");
-
-
-router.post("/", authenticateToken, debtController.createDebt);
-
+const { authenticateToken } = require("../middlewares/authMiddleware");
 
 router.get("/", authenticateToken, debtController.getDebts);
-
-
-router.put("/:id", authenticateToken, debtController.updateDebt);
-
-
-router.delete("/:id", authenticateToken, debtController.deleteDebt);
+router.post("/", authenticateToken, debtController.createDebt);
+router.put("/:debtId", authenticateToken, debtController.updateDebt);
+router.delete("/:debtId", authenticateToken, debtController.deleteDebt);
 
 module.exports = router;

@@ -28,14 +28,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// Error handling middleware to catch all errors and log them
-app.use((err, req, res, next) => {
-  console.error("Error caught in middleware:", err);
-  if (!res.headersSent) {
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-});
-
 const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/users");
 const groupRoutes = require("./routes/groups");
@@ -46,6 +38,7 @@ const debtRoutes = require("./routes/debts");
 const budgetSectionsRoutes = require("./routes/budgetSections");
 const budgetCategoryPlansRoutes = require("./routes/budgetCategoryPlans");
 const categoriesRoutes = require("./routes/categories");
+const walletRoutes = require("./routes/wallets"); // Added wallets route
 
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
@@ -57,11 +50,19 @@ app.use("/api/debts", debtRoutes);
 app.use("/api/budgets", budgetSectionsRoutes);
 app.use("/api/budgets", budgetCategoryPlansRoutes);
 app.use("/api/categories", categoriesRoutes);
+app.use("/api/wallets", walletRoutes); // Register wallets route
 
 app.get("/api/", (req, res) => {
   res.status(200).send("API is running");
 });
 
+// Error handling middleware to catch all errors and log them
+app.use((err, req, res, next) => {
+  console.error("Error caught in middleware:", err);
+  if (!res.headersSent) {
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
 
 // Initialize database connection once on startup
 const initializeDatabase = async () => {

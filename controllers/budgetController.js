@@ -68,7 +68,13 @@ async function getBudget(req, res) {
   const { budgetId } = req.params;
   try {
     const budget = await Budget.findByPk(budgetId, {
-      include: [{ model: BudgetSection, include: [BudgetCategoryPlan] }],
+      include: [
+        {
+          model: BudgetSection,
+          as: "sections",
+          include: [{ model: BudgetCategoryPlan, as: "BudgetCategoryPlans" }],
+        },
+      ],
     });
     if (!budget) return res.status(404).json({ message: "Budget not found" });
     return res.json(budget);
@@ -126,7 +132,13 @@ async function getCurrentBudget(req, res) {
         startDate: { [Op.lte]: currentMonthStart },
         endDate: { [Op.gte]: currentMonthStart },
       },
-      include: [{ model: BudgetSection, include: [BudgetCategoryPlan] }],
+      include: [
+        {
+          model: BudgetSection,
+          as: "sections",
+          include: [{ model: BudgetCategoryPlan, as: "BudgetCategoryPlans" }],
+        },
+      ],
     });
     if (!budget) {
       return res.status(404).json({ message: "No current budget found" });
@@ -151,10 +163,10 @@ async function getBudgetForMonth(req, res) {
       .json({ message: "Invalid month format. Use YYYY-MM." });
   }
 
-  const startDate = new Date(month + "-01").toISOString().split("T")[0]; // First day of the month
+  const startDate = new Date(month + "-01").toISOString().split("T")[0];
   const endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 2, 0)
     .toISOString()
-    .split("T")[0]; // Last day of the month
+    .split("T")[0];
 
   try {
     const budget = await Budget.findOne({
@@ -164,7 +176,13 @@ async function getBudgetForMonth(req, res) {
         startDate: { [Op.lte]: startDate },
         endDate: { [Op.gte]: endDate },
       },
-      include: [{ model: BudgetSection, include: [BudgetCategoryPlan] }],
+      include: [
+        {
+          model: BudgetSection,
+          as: "sections",
+          include: [{ model: BudgetCategoryPlan, as: "BudgetCategoryPlans" }],
+        },
+      ],
     });
     if (!budget) {
       return res
@@ -231,7 +249,8 @@ async function getRemainingBudget(req, res) {
       include: [
         {
           model: BudgetSection,
-          include: [BudgetCategoryPlan],
+          as: "sections",
+          include: [{ model: BudgetCategoryPlan, as: "BudgetCategoryPlans" }],
         },
       ],
     });
@@ -267,14 +286,11 @@ async function getRemainingBudget(req, res) {
 
     // Collect all categoryIds from budget plans
     const budgetCategoryIds = new Set();
-    budget.BudgetSections.forEach((section) => {
+    budget.sections.forEach((section) => {
       section.BudgetCategoryPlans.forEach((plan) => {
         budgetCategoryIds.add(plan.categoryId);
       });
     });
-
-    console.log("Budget Category IDs:", Array.from(budgetCategoryIds));
-    console.log("Transaction Category IDs:", Object.keys(categoryTotals));
 
     let unknownSpent = 0;
     for (const trans of transactions) {
@@ -290,8 +306,7 @@ async function getRemainingBudget(req, res) {
     // Prepare extra categories data
     const extraCategories = [];
     if (extraCategoryIds.length > 0) {
-      // Convert BudgetSections to plain objects
-      const budgetSectionsPlain = budget.BudgetSections.map((section) =>
+      const budgetSectionsPlain = budget.sections.map((section) =>
         section.get ? section.get({ plain: true }) : section
       );
 
@@ -324,12 +339,10 @@ async function getRemainingBudget(req, res) {
       generalSection.BudgetCategoryPlans =
         generalSection.BudgetCategoryPlans.concat(extraCategories);
 
-      // Replace budget.BudgetSections with plain objects including general section
-      budget.BudgetSections = budgetSectionsPlain;
+      budget.sections = budgetSectionsPlain;
     }
 
-    // Calculate remaining amounts for each section and category
-    const sectionsWithRemaining = budget.BudgetSections.map((section) => {
+    const sectionsWithRemaining = budget.sections.map((section) => {
       const categories = section.BudgetCategoryPlans.map((plan) => {
         const spent = categoryTotals[plan.categoryId] || 0;
         const remaining = parseFloat(plan.plannedAmount) - spent;
@@ -346,11 +359,10 @@ async function getRemainingBudget(req, res) {
           ...planData,
           spent,
           remaining,
-          percentageUsed: Math.min(Math.max(percentageUsed, 0), 100), // Ensure between 0-100
+          percentageUsed: Math.min(Math.max(percentageUsed, 0), 100),
         };
       });
 
-      // Use toJSON if available and section is a Sequelize instance, else use section as is
       const sectionData =
         section && typeof section.toJSON === "function"
           ? section.toJSON()

@@ -11,6 +11,7 @@ const Transaction = require("./Transaction");
 const RecurrentPayment = require("./RecurrentPayment");
 const Debt = require("./Debt");
 const BudgetSection = require("./BudgetSection");
+const Wallet = require("./Wallet");
 
 /* 
    Users and Groups are linked via UserGroup, which includes a Role.
@@ -54,7 +55,7 @@ BudgetCategoryPlan.belongsTo(Budget, { foreignKey: "budgetId" });
 BudgetCategoryPlan.belongsTo(Category, { foreignKey: "categoryId" });
 Category.hasMany(BudgetCategoryPlan, { foreignKey: "categoryId" });
 
-Budget.hasMany(BudgetSection, { foreignKey: "budgetId", onDelete: "CASCADE" });
+Budget.hasMany(BudgetSection, { foreignKey: "budgetId", onDelete: "CASCADE", as: "sections" });
 BudgetSection.belongsTo(Budget, { foreignKey: "budgetId" });
 
 BudgetSection.hasMany(BudgetCategoryPlan, {
@@ -66,28 +67,32 @@ BudgetCategoryPlan.belongsTo(BudgetSection, { foreignKey: "sectionId" });
 // Transaction associations
 Transaction.belongsTo(Category, { foreignKey: "categoryId" });
 Category.hasMany(Transaction, { foreignKey: "categoryId" });
-Transaction.belongsTo(User, { foreignKey: "UserId" });
-User.hasMany(Transaction, { foreignKey: "UserId" });
-Transaction.belongsTo(Group, { foreignKey: "GroupId" });
-Group.hasMany(Transaction, { foreignKey: "GroupId" });
+Transaction.belongsTo(User, { foreignKey: "userId" });
+User.hasMany(Transaction, { foreignKey: "userId" });
+Transaction.belongsTo(Group, { foreignKey: "groupId" });
+Group.hasMany(Transaction, { foreignKey: "groupId" });
 Transaction.belongsTo(RecurrentPayment, { foreignKey: "recurrentPaymentId" });
 RecurrentPayment.hasMany(Transaction, { foreignKey: "recurrentPaymentId" });
 
 // RecurrentPayment associations
 RecurrentPayment.belongsTo(Category, { foreignKey: "categoryId" });
 Category.hasMany(RecurrentPayment, { foreignKey: "categoryId" });
-RecurrentPayment.belongsTo(User, { foreignKey: "UserId" });
-User.hasMany(RecurrentPayment, { foreignKey: "UserId" });
-RecurrentPayment.belongsTo(Group, { foreignKey: "GroupId" });
-Group.hasMany(RecurrentPayment, { foreignKey: "GroupId" });
+RecurrentPayment.belongsTo(User, { foreignKey: "userId" });
+User.hasMany(RecurrentPayment, { foreignKey: "userId" });
+RecurrentPayment.belongsTo(Group, { foreignKey: "groupId" });
+Group.hasMany(RecurrentPayment, { foreignKey: "groupId" });
 
 // Debt associations
 Debt.belongsTo(Category, { foreignKey: "categoryId" });
 Category.hasMany(Debt, { foreignKey: "categoryId" });
-Debt.belongsTo(User, { foreignKey: "UserId" });
-User.hasMany(Debt, { foreignKey: "UserId" });
-Debt.belongsTo(Group, { foreignKey: "GroupId" });
-Group.hasMany(Debt, { foreignKey: "GroupId" });
+Debt.belongsTo(User, { foreignKey: "userId" });
+User.hasMany(Debt, { foreignKey: "userId" });
+Debt.belongsTo(Group, { foreignKey: "groupId" });
+Group.hasMany(Debt, { foreignKey: "groupId" });
+
+// Wallet associations
+Wallet.belongsTo(User, { foreignKey: "userId" });
+User.hasMany(Wallet, { foreignKey: "userId" });
 
 module.exports = {
   User,
@@ -103,4 +108,5 @@ module.exports = {
   Transaction,
   RecurrentPayment,
   Debt,
+  Wallet,
 };
