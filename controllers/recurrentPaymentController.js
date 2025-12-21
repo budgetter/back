@@ -1,23 +1,25 @@
-const RecurrentPayment = require('../models/RecurrentPayment');
+const { RecurrentPayment } = require('../models');
+const { v4: uuidv4 } = require('uuid');
 
 /**
  * Create a recurrent payment.
  */
 async function createRecurrentPayment(req, res) {
-  const { amount, frequency, startDate, endDate, nextPaymentDate, categoryId, UserId, GroupId } = req.body;
-  if (!amount || !frequency || !startDate || !nextPaymentDate || !categoryId || !UserId) {
+  const { amount, frequency, startDate, endDate, nextPaymentDate, categoryId, userId, groupId } = req.body;
+  if (!amount || !frequency || !startDate || !nextPaymentDate || !categoryId || !userId) {
     return res.status(400).json({ message: 'Missing required fields for recurrent payment.' });
   }
   try {
     const recurrentPayment = await RecurrentPayment.create({
+      id: uuidv4(),
       amount,
       frequency,
       startDate,
       endDate: endDate || null,
       nextPaymentDate,
       categoryId,
-      UserId,
-      GroupId: GroupId || null,
+      userId,
+      groupId: groupId || null,
     });
     return res.status(201).json({
       message: 'Recurrent payment created successfully',

@@ -1,4 +1,5 @@
-const Wallet = require("../models/Wallet");
+const { Wallet } = require("../models");
+const { v4: uuidv4 } = require("uuid");
 
 async function getWallets(req, res) {
   const userId = req.user.id;
@@ -18,7 +19,13 @@ async function createWallet(req, res) {
     return res.status(400).json({ message: "Name is required" });
   }
   try {
-    const wallet = await Wallet.create({ userId, name, icon, balance: 0 });
+    const wallet = await Wallet.create({
+      id: uuidv4(),
+      userId,
+      name,
+      icon,
+      balance: 0
+    });
     return res.status(201).json({ wallet });
   } catch (error) {
     console.error("Error creating wallet:", error);

@@ -12,7 +12,16 @@ const RecurrentPayment = sequelize.define('RecurrentPayment', {
     allowNull: false,
   },
   frequency: {
-    type: DataTypes.ENUM('daily', 'weekly', 'monthly', 'yearly'),
+    type: DataTypes.ENUM(
+      "daily",
+      "weekly",
+      "weekdays",
+      "biweekly",
+      "monthly",
+      "bimonthly",
+      "semiannually",
+      "yearly"
+    ),
     allowNull: false,
   },
   startDate: {
@@ -21,6 +30,19 @@ const RecurrentPayment = sequelize.define('RecurrentPayment', {
   },
   endDate: {
     type: DataTypes.DATEONLY,
+    allowNull: true,
+  },
+  description: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  type: {
+    type: DataTypes.ENUM("expense", "income"),
+    allowNull: false,
+    defaultValue: "expense",
+  },
+  walletId: {
+    type: DataTypes.UUID,
     allowNull: true,
   },
   nextPaymentDate: {

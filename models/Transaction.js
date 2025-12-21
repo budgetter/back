@@ -23,6 +23,10 @@ const Transaction = sequelize.define('Transaction', {
     type: DataTypes.ENUM('expense', 'income'),
     allowNull: false,
   },
+  walletId: {
+    type: DataTypes.UUID,
+    allowNull: true,
+  },
 }, {
   tableName: 'transactions',
   timestamps: true,
@@ -30,6 +34,7 @@ const Transaction = sequelize.define('Transaction', {
     { fields: ['UserId'] },
     { fields: ['GroupId'] },
     { fields: ['categoryId'] },
+    { fields: ['walletId'] },
     { fields: ['date'] },
   ],
 });

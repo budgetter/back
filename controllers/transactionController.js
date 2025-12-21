@@ -1,26 +1,62 @@
-const Transaction = require('../models/Transaction');
+const { Transaction, RecurrentPayment } = require('../models');
+const recurrentService = require('../functions/recurrentService');
 const { v4: uuidv4 } = require('uuid');
 
 /**
  * Create a new transaction.
  */
 async function createTransaction(req, res) {
-  const { amount, description, date, type, categoryId, GroupId, recurrentPaymentId } = req.body;
+  const {
+    amount,
+    description,
+    date,
+    type,
+    categoryId,
+    GroupId,
+    recurrentPaymentId,
+    walletId,
+    frequency
+  } = req.body;
+
   if (!amount || !type || !categoryId) {
     return res.status(400).json({ message: 'Missing required fields: amount, type, or categoryId' });
   }
+
   try {
+    const transactionDate = date || new Date().toISOString().split('T')[0];
+
     const transaction = await Transaction.create({
       id: uuidv4(),
       amount,
       description,
-      date: date || new Date(),
+      date: transactionDate,
       type,
       categoryId,
       UserId: req.user.id,
       GroupId: GroupId || null,
       recurrentPaymentId: recurrentPaymentId || null,
+      walletId: walletId || null,
     });
+
+    // If frequency is provided and not "none"/"never", create a RecurrentPayment
+    if (frequency && frequency !== 'none' && frequency !== 'never') {
+      const nextPaymentDate = recurrentService.calculateNextDate(transactionDate, frequency);
+
+      await RecurrentPayment.create({
+        id: uuidv4(),
+        amount,
+        description,
+        frequency,
+        startDate: transactionDate,
+        nextPaymentDate,
+        type,
+        categoryId,
+        userId: req.user.id,
+        groupId: GroupId || null,
+        walletId: walletId || null,
+      });
+    }
+
     return res.status(201).json({ message: 'Transaction created successfully', transaction });
   } catch (error) {
     console.error('Error creating transaction:', error);

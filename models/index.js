@@ -73,6 +73,10 @@ Transaction.belongsTo(Group, { foreignKey: "GroupId" });
 Group.hasMany(Transaction, { foreignKey: "GroupId" });
 Transaction.belongsTo(RecurrentPayment, { foreignKey: "recurrentPaymentId" });
 RecurrentPayment.hasMany(Transaction, { foreignKey: "recurrentPaymentId" });
+Transaction.belongsTo(Wallet, { foreignKey: "walletId" });
+Wallet.hasMany(Transaction, { foreignKey: "walletId" });
+RecurrentPayment.belongsTo(Wallet, { foreignKey: "walletId" });
+Wallet.hasMany(RecurrentPayment, { foreignKey: "walletId" });
 
 // RecurrentPayment associations
 RecurrentPayment.belongsTo(Category, { foreignKey: "categoryId" });

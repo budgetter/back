@@ -4,6 +4,7 @@ const BudgetCategoryPlan = require("../models/BudgetCategoryPlan");
 const Transaction = require("../models/Transaction");
 const sequelize = require("../config/database");
 const { Op } = require("sequelize");
+const recurrentService = require("../functions/recurrentService");
 
 async function createBudget(req, res) {
   const { ownerType, ownerId, totalBudget, startDate, endDate, sections } =
@@ -228,16 +229,19 @@ async function getRemainingBudget(req, res) {
       .json({ message: "Invalid month format. Use YYYY-MM." });
   }
 
-  const startDate = new Date(month + "-01").toISOString().split("T")[0];
-  const endDate = new Date(
-    new Date(startDate).getFullYear(),
-    new Date(startDate).getMonth() + 2,
-    0
-  )
-    .toISOString()
-    .split("T")[0];
-
   try {
+    // Trigger sync of recurrent payments before calculating budget
+    await recurrentService.syncUserRecurrentPayments(userId);
+
+    const startDate = new Date(month + "-01").toISOString().split("T")[0];
+    const endDate = new Date(
+      new Date(startDate).getFullYear(),
+      new Date(startDate).getMonth() + 2,
+      0
+    )
+      .toISOString()
+      .split("T")[0];
+
     // Get the budget for the month
     let budget = await Budget.findOne({
       where: {
