@@ -1,7 +1,10 @@
-const Budget = require("../models/Budget");
-const BudgetSection = require("../models/BudgetSection");
-const BudgetCategoryPlan = require("../models/BudgetCategoryPlan");
-const Transaction = require("../models/Transaction");
+const {
+  Budget,
+  BudgetSection,
+  BudgetCategoryPlan,
+  Transaction,
+  Category,
+} = require("../models");
 const sequelize = require("../config/database");
 const { Op } = require("sequelize");
 const recurrentService = require("../functions/recurrentService");
@@ -254,7 +257,13 @@ async function getRemainingBudget(req, res) {
         {
           model: BudgetSection,
           as: "sections",
-          include: [{ model: BudgetCategoryPlan, as: "BudgetCategoryPlans" }],
+          include: [
+            {
+              model: BudgetCategoryPlan,
+              as: "BudgetCategoryPlans",
+              include: [{ model: Category, attributes: ["id", "name", "icon", "type"] }]
+            }
+          ],
         },
       ],
     });
@@ -269,7 +278,7 @@ async function getRemainingBudget(req, res) {
       };
     }
 
-    // Get all transactions for the month
+    // Get all transactions for the month with category details
     const transactions = await Transaction.findAll({
       where: {
         UserId: userId,
@@ -277,51 +286,76 @@ async function getRemainingBudget(req, res) {
           [Op.between]: [startDate, endDate],
         },
       },
-      attributes: [
-        "categoryId",
-        [sequelize.fn("SUM", sequelize.col("amount")), "totalAmount"],
-      ],
-      group: ["categoryId"],
+      include: [{ model: Category, attributes: ["id", "name", "icon", "type"] }],
     });
 
-    // Create a map of category totals
-    const categoryTotals = transactions.reduce((acc, trans) => {
-      acc[trans.categoryId] = parseFloat(
-        trans.getDataValue("totalAmount") || 0
-      );
-      return acc;
-    }, {});
+    // Create a map of category totals by type (expense vs income)
+    const categoryTotals = {};
+    let totalIncome = 0;
+    let totalExpense = 0;
+
+    transactions.forEach((trans) => {
+      const catId = trans.categoryId;
+      const amount = parseFloat(trans.amount || 0);
+      const category = trans.Category;
+      const type = category ? category.type : trans.type;
+
+      if (!categoryTotals[catId]) {
+        categoryTotals[catId] = {
+          amount: 0,
+          name: category ? category.name : "Unknown",
+          icon: category ? category.icon : "FiHelpCircle",
+          type: type
+        };
+      }
+      categoryTotals[catId].amount += amount;
+
+      if (type === "income") {
+        totalIncome += amount;
+      } else {
+        totalExpense += amount;
+      }
+    });
 
     // Collect all categoryIds from budget plans
     const budgetCategoryIds = new Set();
-    budget.sections.forEach((section) => {
-      section.BudgetCategoryPlans.forEach((plan) => {
+    const budgetSections = budget.sections || [];
+    budgetSections.forEach((section) => {
+      const plans = section.BudgetCategoryPlans || [];
+      plans.forEach((plan) => {
         budgetCategoryIds.add(plan.categoryId);
       });
     });
 
-    let unknownSpent = 0;
-    for (const trans of transactions) {
-      if (!budgetCategoryIds.has(trans.categoryId)) {
-        unknownSpent += parseFloat(trans.getDataValue("totalAmount") || 0);
-      }
-    }
-
-    // Categories from transactions not in budget plans
-    const extraCategoryIds = Object.keys(categoryTotals).filter(
-      (catId) => !budgetCategoryIds.has(Number(catId))
+    // Prepare extra categories data (for those not in the budget plan)
+    const extraCategoryPlans = [];
+    const budgetSectionsPlain = budgetSections.map((section) =>
+      section.get ? section.get({ plain: true }) : section
     );
-    // Prepare extra categories data
-    const extraCategories = [];
-    if (extraCategoryIds.length > 0) {
-      const budgetSectionsPlain = budget.sections.map((section) =>
-        section.get ? section.get({ plain: true }) : section
-      );
 
-      // Find or create "General" section in memory
-      let generalSection = budgetSectionsPlain.find(
-        (s) => s.name === "Not Planned"
-      );
+    // Find "Not Planned" section if it exists
+    let generalSection = budgetSectionsPlain.find(
+      (s) => s.name === "Not Planned"
+    );
+
+    Object.keys(categoryTotals).forEach((catId) => {
+      if (!budgetCategoryIds.has(catId)) {
+        const cat = categoryTotals[catId];
+        extraCategoryPlans.push({
+          id: `extra-${catId}`,
+          categoryId: catId,
+          name: cat.name,
+          icon: cat.icon,
+          plannedAmount: 0,
+          type: cat.type,
+          spent: cat.amount,
+          remaining: cat.type === "income" ? cat.amount : 0 - cat.amount,
+          percentageUsed: 100,
+        });
+      }
+    });
+
+    if (extraCategoryPlans.length > 0) {
       if (!generalSection) {
         generalSection = {
           id: "noPlanned",
@@ -330,36 +364,34 @@ async function getRemainingBudget(req, res) {
         };
         budgetSectionsPlain.push(generalSection);
       }
-
-      for (const catId of extraCategoryIds) {
-        extraCategories.push({
-          id: `extra-${catId}`,
-          categoryId: Number(catId),
-          name: "Unplanned Category", // Frontend can replace with actual category name
-          plannedAmount: 0,
-          spent: categoryTotals[catId],
-          remaining: -categoryTotals[catId],
-          percentageUsed: 100,
-        });
-      }
-
-      // Add extra categories to general section
-      generalSection.BudgetCategoryPlans =
-        generalSection.BudgetCategoryPlans.concat(extraCategories);
-
+      generalSection.BudgetCategoryPlans = generalSection.BudgetCategoryPlans.concat(extraCategoryPlans);
       budget.sections = budgetSectionsPlain;
     }
 
     const sectionsWithRemaining = budget.sections.map((section) => {
-      const categories = section.BudgetCategoryPlans.map((plan) => {
-        const spent = categoryTotals[plan.categoryId] || 0;
-        const remaining = parseFloat(plan.plannedAmount) - spent;
-        const percentageUsed =
-          plan.plannedAmount > 0
-            ? (spent / parseFloat(plan.plannedAmount)) * 100
-            : 100;
+      const plans = section.BudgetCategoryPlans || [];
+      const updatedCategories = plans.map((plan) => {
+        // Skip if already processed as 'extra'
+        if (typeof plan.id === 'string' && plan.id.startsWith('extra-')) return plan;
 
-        // Use toJSON if available and plan is a Sequelize instance, else use plan as is
+        const catData = categoryTotals[plan.categoryId];
+        const spent = catData ? catData.amount : 0;
+
+        // Use type from Category if available, else from plan
+        const type = plan.Category ? plan.Category.type : (plan.type || 'expense');
+
+        let remaining;
+        if (type === "income") {
+          remaining = spent - parseFloat(plan.plannedAmount);
+        } else {
+          remaining = parseFloat(plan.plannedAmount) - spent;
+        }
+
+        const percentageUsed =
+          parseFloat(plan.plannedAmount) > 0
+            ? (spent / parseFloat(plan.plannedAmount)) * 100
+            : (spent > 0 ? 100 : 0);
+
         const planData =
           plan && typeof plan.toJSON === "function" ? plan.toJSON() : plan;
 
@@ -367,7 +399,10 @@ async function getRemainingBudget(req, res) {
           ...planData,
           spent,
           remaining,
+          type,
           percentageUsed: Math.min(Math.max(percentageUsed, 0), 100),
+          name: plan.Category ? plan.Category.name : (planData.name || 'Unknown'),
+          icon: plan.Category ? plan.Category.icon : (planData.icon || 'FiHelpCircle'),
         };
       });
 
@@ -378,38 +413,20 @@ async function getRemainingBudget(req, res) {
 
       return {
         ...sectionData,
-        categories,
+        categories: updatedCategories,
       };
     });
 
-    // Add an "Unknown" category section if unknownSpent > 0
-    // if (unknownSpent > 0) {
-    //   sectionsWithRemaining.push({
-    //     id: "unknown",
-    //     name: "Unknown",
-    //     categories: [
-    //       {
-    //         id: "unknown",
-    //         categoryId: "unknown",
-    //         name: "Unknown",
-    //         plannedAmount: 0,
-    //         spent: unknownSpent,
-    //         remaining: -unknownSpent,
-    //         percentageUsed: 100,
-    //         toJSON() {
-    //           return this;
-    //         },
-    //       },
-    //     ],
-    //     toJSON() {
-    //       return this;
-    //     },
-    //   });
-    // }
+    const budgetPlain = budget && typeof budget.toJSON === "function" ? budget.toJSON() : budget;
 
     return res.json({
-      budget: budget.toJSON(),
+      budget: budgetPlain,
       sections: sectionsWithRemaining,
+      stats: {
+        totalIncome,
+        totalExpense,
+        balance: totalIncome - totalExpense
+      },
       month,
     });
   } catch (error) {

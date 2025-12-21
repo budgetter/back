@@ -1,4 +1,5 @@
-const Debt = require("../models/Debt");
+const { Debt } = require("../models");
+const { v4: uuidv4 } = require("uuid");
 
 async function getDebts(req, res) {
   const userId = req.user.id;
@@ -36,6 +37,7 @@ async function createDebt(req, res) {
 
   try {
     const debt = await Debt.create({
+      id: uuidv4(),
       userId,
       bankName,
       totalDebt,
@@ -43,7 +45,7 @@ async function createDebt(req, res) {
       monthlyRate,
       annualRate,
       creditNumber,
-      linkedWalletId,
+      linkedWalletId: linkedWalletId || null,
     });
     return res.status(201).json({ debt });
   } catch (error) {

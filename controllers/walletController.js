@@ -4,8 +4,44 @@ const { v4: uuidv4 } = require("uuid");
 async function getWallets(req, res) {
   const userId = req.user.id;
   try {
-    const wallets = await Wallet.findAll({ where: { userId } });
-    return res.json({ wallets });
+    const wallets = await Wallet.findAll({
+      where: { userId },
+      include: [
+        {
+          model: require("../models").Transaction,
+          limit: 3,
+          order: [["date", "DESC"], ["createdAt", "DESC"]],
+          include: [{ model: require("../models").Category, attributes: ["name", "icon"] }]
+        }
+      ]
+    });
+
+    // Calculate aggregated stats for each wallet
+    const walletsWithStats = await Promise.all(wallets.map(async (wallet) => {
+      const transactions = await require("../models").Transaction.findAll({
+        where: { walletId: wallet.id }
+      });
+
+      let incomes = 0;
+      let expenses = 0;
+
+      transactions.forEach(t => {
+        const amount = parseFloat(t.amount || 0);
+        if (t.type === 'income') incomes += amount;
+        else expenses += amount;
+      });
+
+      const walletData = wallet.toJSON();
+      walletData.stats = {
+        incomes,
+        expenses,
+        netBalance: incomes - expenses
+      };
+
+      return walletData;
+    }));
+
+    return res.json({ wallets: walletsWithStats });
   } catch (error) {
     console.error("Error fetching wallets:", error);
     return res.status(500).json({ message: "Server error fetching wallets" });
@@ -14,17 +50,25 @@ async function getWallets(req, res) {
 
 async function createWallet(req, res) {
   const userId = req.user.id;
-  const { name, icon } = req.body;
+  const { name, icon, balance, color, goalAmount, isDefault } = req.body;
   if (!name) {
     return res.status(400).json({ message: "Name is required" });
   }
   try {
+    // If setting as default, unset others first
+    if (isDefault) {
+      await Wallet.update({ isDefault: false }, { where: { userId } });
+    }
+
     const wallet = await Wallet.create({
       id: uuidv4(),
       userId,
       name,
       icon,
-      balance: 0
+      balance: balance || 0,
+      color,
+      goalAmount,
+      isDefault: isDefault || false
     });
     return res.status(201).json({ wallet });
   } catch (error) {
@@ -36,13 +80,19 @@ async function createWallet(req, res) {
 async function updateWallet(req, res) {
   const userId = req.user.id;
   const { walletId } = req.params;
-  const updateData = req.body;
+  const { name, icon, balance, color, goalAmount, isDefault } = req.body;
   try {
     const wallet = await Wallet.findOne({ where: { id: walletId, userId } });
     if (!wallet) {
       return res.status(404).json({ message: "Wallet not found" });
     }
-    Object.assign(wallet, updateData);
+
+    // If setting as default, unset others first
+    if (isDefault && !wallet.isDefault) {
+      await Wallet.update({ isDefault: false }, { where: { userId } });
+    }
+
+    Object.assign(wallet, { name, icon, balance, color, goalAmount, isDefault });
     await wallet.save();
     return res.json({ wallet });
   } catch (error) {

@@ -26,6 +26,19 @@ const Wallet = sequelize.define(
       type: DataTypes.STRING, // Emoji or icon string
       allowNull: true,
     },
+    isDefault: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+    color: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    goalAmount: {
+      type: DataTypes.DECIMAL(15, 2),
+      allowNull: true,
+    },
   },
   {
     tableName: "wallets",
