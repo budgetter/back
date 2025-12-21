@@ -67,10 +67,10 @@ BudgetCategoryPlan.belongsTo(BudgetSection, { foreignKey: "sectionId" });
 // Transaction associations
 Transaction.belongsTo(Category, { foreignKey: "categoryId" });
 Category.hasMany(Transaction, { foreignKey: "categoryId" });
-Transaction.belongsTo(User, { foreignKey: "userId" });
-User.hasMany(Transaction, { foreignKey: "userId" });
-Transaction.belongsTo(Group, { foreignKey: "groupId" });
-Group.hasMany(Transaction, { foreignKey: "groupId" });
+Transaction.belongsTo(User, { foreignKey: "UserId" });
+User.hasMany(Transaction, { foreignKey: "UserId" });
+Transaction.belongsTo(Group, { foreignKey: "GroupId" });
+Group.hasMany(Transaction, { foreignKey: "GroupId" });
 Transaction.belongsTo(RecurrentPayment, { foreignKey: "recurrentPaymentId" });
 RecurrentPayment.hasMany(Transaction, { foreignKey: "recurrentPaymentId" });
 

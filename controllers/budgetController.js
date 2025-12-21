@@ -239,7 +239,7 @@ async function getRemainingBudget(req, res) {
 
   try {
     // Get the budget for the month
-    const budget = await Budget.findOne({
+    let budget = await Budget.findOne({
       where: {
         ownerType: "User",
         ownerId: userId,
@@ -255,10 +255,14 @@ async function getRemainingBudget(req, res) {
       ],
     });
 
+    // If no budget found, we still want to show transactions as "Not Planned"
     if (!budget) {
-      return res
-        .status(404)
-        .json({ message: "No budget found for the selected month" });
+      budget = {
+        id: 0,
+        totalBudget: 0,
+        sections: [],
+        toJSON: () => ({ id: 0, totalBudget: 0 })
+      };
     }
 
     // Get all transactions for the month
@@ -301,7 +305,7 @@ async function getRemainingBudget(req, res) {
 
     // Categories from transactions not in budget plans
     const extraCategoryIds = Object.keys(categoryTotals).filter(
-      (catId) => !budgetCategoryIds.has(catId)
+      (catId) => !budgetCategoryIds.has(Number(catId))
     );
     // Prepare extra categories data
     const extraCategories = [];
@@ -326,8 +330,8 @@ async function getRemainingBudget(req, res) {
       for (const catId of extraCategoryIds) {
         extraCategories.push({
           id: `extra-${catId}`,
-          categoryId: catId,
-          name: "Unknown Category", // Frontend can replace with actual category name
+          categoryId: Number(catId),
+          name: "Unplanned Category", // Frontend can replace with actual category name
           plannedAmount: 0,
           spent: categoryTotals[catId],
           remaining: -categoryTotals[catId],
