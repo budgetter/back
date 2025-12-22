@@ -39,6 +39,7 @@ const budgetSectionsRoutes = require("./routes/budgetSections");
 const budgetCategoryPlansRoutes = require("./routes/budgetCategoryPlans");
 const categoriesRoutes = require("./routes/categories");
 const walletRoutes = require("./routes/wallets"); // Added wallets route
+const dashboardRoutes = require("./routes/dashboard");
 
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
@@ -51,6 +52,7 @@ app.use("/api/budgets", budgetSectionsRoutes);
 app.use("/api/budgets", budgetCategoryPlansRoutes);
 app.use("/api/categories", categoriesRoutes);
 app.use("/api/wallets", walletRoutes); // Register wallets route
+app.use("/api/dashboard", dashboardRoutes);
 
 app.get("/api/", (req, res) => {
   res.status(200).send("API is running");
