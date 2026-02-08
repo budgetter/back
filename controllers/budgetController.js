@@ -4,28 +4,30 @@ const {
   BudgetCategoryPlan,
   Transaction,
   Category,
+  UserGroup,
 } = require("../models");
 const sequelize = require("../config/database");
 const { Op } = require("sequelize");
 const recurrentService = require("../functions/recurrentService");
 
 async function createBudget(req, res) {
-  const { ownerType, ownerId, totalBudget, startDate, endDate, sections } =
+  const { name, ownerType = "User", ownerId, totalBudget, startDate, endDate, sections = [] } =
     req.body;
+
+  const finalOwnerId = ownerId || (ownerType === "User" ? req.user.id : null);
+
   if (
-    !ownerType ||
-    !ownerId ||
-    !totalBudget ||
+    !finalOwnerId ||
+    totalBudget === undefined ||
     !startDate ||
-    !endDate ||
-    !sections
+    !endDate
   ) {
-    return res.status(400).json({ message: "Missing required budget fields." });
+    return res.status(400).json({ message: "Missing required budget fields (ownerId, totalBudget, startDate, endDate)." });
   }
   const t = await sequelize.transaction();
   try {
     const budget = await Budget.create(
-      { ownerType, ownerId, totalBudget, startDate, endDate },
+      { name: name || "New Budget", ownerType, ownerId: finalOwnerId, totalBudget, startDate, endDate },
       { transaction: t }
     );
     const createdSections = [];
@@ -129,10 +131,20 @@ async function getCurrentBudget(req, res) {
     .toISOString()
     .split("T")[0];
   try {
+    // 1. Get Group IDs the user belongs to
+    const userGroups = await UserGroup.findAll({
+      where: { UserId: userId },
+      attributes: ["GroupId"]
+    });
+    const groupIds = userGroups.map(ug => ug.GroupId);
+
+    // 2. Find current budget (Personal or Shared)
     const budget = await Budget.findOne({
       where: {
-        ownerType: "User",
-        ownerId: userId,
+        [Op.or]: [
+          { ownerType: "User", ownerId: userId },
+          { ownerType: "Group", ownerId: { [Op.in]: groupIds } }
+        ],
         startDate: { [Op.lte]: currentMonthStart },
         endDate: { [Op.gte]: currentMonthStart },
       },
@@ -143,6 +155,7 @@ async function getCurrentBudget(req, res) {
           include: [{ model: BudgetCategoryPlan, as: "BudgetCategoryPlans" }],
         },
       ],
+      order: [['ownerType', 'DESC']] // Prefer Group/Shared budgets for current view if available
     });
     if (!budget) {
       return res.status(404).json({ message: "No current budget found" });
@@ -168,7 +181,7 @@ async function getBudgetForMonth(req, res) {
   }
 
   const startDate = new Date(month + "-01").toISOString().split("T")[0];
-  const endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 2, 0)
+  const endDate = new Date(new Date(startDate).getFullYear(), new Date(startDate).getMonth() + 2, 0)
     .toISOString()
     .split("T")[0];
 
@@ -205,10 +218,19 @@ async function getBudgetForMonth(req, res) {
 async function getBudgetList(req, res) {
   const userId = req.user.id;
   try {
+    // 1. Get Group IDs the user belongs to
+    const userGroups = await UserGroup.findAll({
+      where: { UserId: userId },
+      attributes: ["GroupId"]
+    });
+    const groupIds = userGroups.map(ug => ug.GroupId);
+
     const budgets = await Budget.findAll({
       where: {
-        ownerType: "User",
-        ownerId: userId,
+        [Op.or]: [
+          { ownerType: "User", ownerId: userId },
+          { ownerType: "Group", ownerId: { [Op.in]: groupIds } }
+        ]
       },
       order: [["startDate", "DESC"]],
     });
@@ -223,7 +245,8 @@ async function getBudgetList(req, res) {
 
 async function getRemainingBudget(req, res) {
   const userId = req.user.id;
-  const { month } = req.query; // Expecting a month parameter in YYYY-MM format
+  const { month } = req.query;
+  const { budgetId } = req.params;
 
   // Validate the month format
   if (!/^\d{4}-\d{2}$/.test(month)) {
@@ -245,28 +268,57 @@ async function getRemainingBudget(req, res) {
       .toISOString()
       .split("T")[0];
 
-    // Get the budget for the month
-    let budget = await Budget.findOne({
-      where: {
-        ownerType: "User",
-        ownerId: userId,
-        startDate: { [Op.lte]: startDate },
-        endDate: { [Op.gte]: endDate },
-      },
-      include: [
-        {
-          model: BudgetSection,
-          as: "sections",
-          include: [
-            {
-              model: BudgetCategoryPlan,
-              as: "BudgetCategoryPlans",
-              include: [{ model: Category, attributes: ["id", "name", "icon", "type"] }]
-            }
+    // Get the budget for the month or by ID
+    let budget;
+    if (budgetId && budgetId !== 'current') {
+      budget = await Budget.findByPk(budgetId, {
+        include: [
+          {
+            model: BudgetSection,
+            as: "sections",
+            include: [
+              {
+                model: BudgetCategoryPlan,
+                as: "BudgetCategoryPlans",
+                include: [{ model: Category, attributes: ["id", "name", "icon", "type"] }]
+              }
+            ],
+          },
+        ],
+      });
+    } else {
+      // Get Group IDs the user belongs to for "current" fallback
+      const userGroups = await UserGroup.findAll({
+        where: { UserId: userId },
+        attributes: ["GroupId"]
+      });
+      const groupIds = userGroups.map(ug => ug.GroupId);
+
+      budget = await Budget.findOne({
+        where: {
+          [Op.or]: [
+            { ownerType: "User", ownerId: userId },
+            { ownerType: "Group", ownerId: { [Op.in]: groupIds } }
           ],
+          startDate: { [Op.lte]: startDate },
+          endDate: { [Op.gte]: startDate }, // Use month start for period check
         },
-      ],
-    });
+        include: [
+          {
+            model: BudgetSection,
+            as: "sections",
+            include: [
+              {
+                model: BudgetCategoryPlan,
+                as: "BudgetCategoryPlans",
+                include: [{ model: Category, attributes: ["id", "name", "icon", "type"] }]
+              }
+            ],
+          },
+        ],
+        order: [['ownerType', 'DESC']]
+      });
+    }
 
     // If no budget found, we still want to show transactions as "Not Planned"
     if (!budget) {
@@ -278,14 +330,24 @@ async function getRemainingBudget(req, res) {
       };
     }
 
+    // Define transaction filter based on budget owner
+    const transactionWhere = {
+      date: {
+        [Op.between]: [startDate, endDate],
+      },
+    };
+
+    if (budget.ownerType === 'Group') {
+      transactionWhere.GroupId = budget.ownerId;
+    } else {
+      transactionWhere.UserId = userId;
+      transactionWhere.GroupId = null; // Only personal transactions? 
+      // Actually usually personal ones don't have GroupId. 
+    }
+
     // Get all transactions for the month with category details
     const transactions = await Transaction.findAll({
-      where: {
-        UserId: userId,
-        date: {
-          [Op.between]: [startDate, endDate],
-        },
-      },
+      where: transactionWhere,
       include: [{ model: Category, attributes: ["id", "name", "icon", "type"] }],
     });
 

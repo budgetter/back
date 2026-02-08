@@ -8,6 +8,7 @@ const transactionRoutes = require("./routes/transactions");
 const walletRoutes = require("./routes/wallets");
 const debtRoutes = require("./routes/debts");
 const dashboardRoutes = require("./routes/dashboard");
+const groupRoutes = require("./routes/groups");
 
 const app = express();
 
@@ -23,6 +24,7 @@ app.use("/api/transactions", transactionRoutes);
 app.use("/api/wallets", walletRoutes);
 app.use("/api/debts", debtRoutes);
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/groups", groupRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

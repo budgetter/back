@@ -1,3 +1,4 @@
+const sequelize = require("../config/database");
 const User = require("./User");
 const Group = require("./Group");
 const Role = require("./Role");
@@ -12,6 +13,7 @@ const RecurrentPayment = require("./RecurrentPayment");
 const Debt = require("./Debt");
 const BudgetSection = require("./BudgetSection");
 const Wallet = require("./Wallet");
+const TransactionSplit = require("./TransactionSplit");
 
 /* 
    Users and Groups are linked via UserGroup, which includes a Role.
@@ -31,6 +33,9 @@ Group.belongsToMany(User, {
 // Link UserGroup to Role
 UserGroup.belongsTo(Role, { foreignKey: "roleId" });
 Role.hasMany(UserGroup, { foreignKey: "roleId" });
+
+// Group Creator association
+Group.belongsTo(User, { as: "creator", foreignKey: "creatorId" });
 
 // Optional: Many-to-many between Role and Permission
 if (Permission && RolePermission) {
@@ -78,6 +83,11 @@ Wallet.hasMany(Transaction, { foreignKey: "walletId" });
 RecurrentPayment.belongsTo(Wallet, { foreignKey: "walletId" });
 Wallet.hasMany(RecurrentPayment, { foreignKey: "walletId" });
 
+// Transaction Split associations
+Transaction.hasMany(TransactionSplit, { foreignKey: "transactionId", onDelete: "CASCADE" });
+TransactionSplit.belongsTo(Transaction, { foreignKey: "transactionId" });
+TransactionSplit.belongsTo(User, { foreignKey: "userId", as: "debtor" }); // User who owes money
+
 // RecurrentPayment associations
 RecurrentPayment.belongsTo(Category, { foreignKey: "categoryId" });
 Category.hasMany(RecurrentPayment, { foreignKey: "categoryId" });
@@ -99,6 +109,7 @@ Wallet.belongsTo(User, { foreignKey: "userId" });
 User.hasMany(Wallet, { foreignKey: "userId" });
 
 module.exports = {
+  sequelize,
   User,
   Group,
   Role,
@@ -113,4 +124,5 @@ module.exports = {
   RecurrentPayment,
   Debt,
   Wallet,
+  TransactionSplit,
 };

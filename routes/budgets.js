@@ -15,6 +15,12 @@ router.get(
   budgetController.getRemainingBudget
 );
 
+router.get(
+  "/:budgetId/remaining",
+  authenticateToken,
+  budgetController.getRemainingBudget
+);
+
 router.get("/:budgetId", authenticateToken, budgetController.getBudget);
 
 router.post("/", authenticateToken, budgetController.createBudget);

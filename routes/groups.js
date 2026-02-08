@@ -1,32 +1,11 @@
-const express = require("express");
+const express = require('express');
 const router = express.Router();
-const { authenticateToken } = require("../middlewares/authMiddleware");
-const roleMiddleware = require("../middlewares/roleMiddleware"); // e.g., require ['Leader']
-const groupController = require("../controllers/groupController");
+const groupController = require('../controllers/groupController');
+const { authenticateToken } = require('../middlewares/authMiddleware');
 
-
-router.post("/", authenticateToken, groupController.createGroup);
-
-
-router.get("/:groupId", authenticateToken, groupController.getGroup);
-
-
-router.put(
-  "/:groupId",
-  authenticateToken,
-  roleMiddleware(["Leader"]),
-  groupController.updateGroup
-);
-
-
-router.delete(
-  "/:groupId",
-  authenticateToken,
-  roleMiddleware(["Leader"]),
-  groupController.deleteGroup
-);
-
-
-router.post("/:groupId/join", authenticateToken, groupController.joinGroup);
+router.post('/create', authenticateToken, groupController.createGroupBudget);
+router.post('/join', authenticateToken, groupController.joinGroup);
+router.get('/:groupId/members', authenticateToken, groupController.getGroupMembers);
+router.put('/transfer-admin', authenticateToken, groupController.transferAdmin);
 
 module.exports = router;

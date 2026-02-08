@@ -11,7 +11,15 @@ const Group = sequelize.define('Group', {
     type: DataTypes.STRING,
     allowNull: false,
   },
-  // Additional fields if necessary.
+  inviteCode: {
+    type: DataTypes.STRING(6),
+    allowNull: true,
+    unique: true,
+  },
+  creatorId: {
+    type: DataTypes.UUID,
+    allowNull: false,
+  },
 }, {
   tableName: 'groups',
   timestamps: true,
