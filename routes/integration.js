@@ -18,6 +18,9 @@ router.get('/settings', authenticateToken, integrationController.getSettings);
 router.put('/settings', authenticateToken, integrationController.updateSettings);
 router.post('/sync', authenticateToken, syncRateLimiter, integrationController.syncNow);
 
+// Preferences
+router.put('/preferences', authenticateToken, integrationController.updatePreferences);
+
 // Error sanitizer — must be last middleware on the router
 router.use(errorSanitizer);
 

@@ -33,6 +33,7 @@
     "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
+    "fast-check": "^4.6.0",
     "jest": "^29.0.0",
     "supertest": "^6.1.3"
   }

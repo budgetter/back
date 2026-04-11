@@ -10,6 +10,7 @@ class GmailService {
         );
         this.oAuth2Client.setCredentials({ refresh_token: refreshToken });
         this.gmail = google.gmail({ version: "v1", auth: this.oAuth2Client });
+        this._labelCache = {};
     }
 
     /**
@@ -88,6 +89,82 @@ class GmailService {
         }
         return body;
     }
+    /**
+     * Marks a Gmail message as read by removing the UNREAD label.
+     * Non-fatal: logs error and continues on failure.
+     * @param {string} messageId - The Gmail message ID to mark as read
+     */
+    async markAsRead(messageId) {
+        try {
+            await this.gmail.users.messages.modify({
+                userId: "me",
+                id: messageId,
+                requestBody: {
+                    removeLabelIds: ["UNREAD"],
+                },
+            });
+        } catch (error) {
+            console.error(`Gmail markAsRead Error for message ${messageId}:`, error);
+        }
+    }
+
+    /**
+     * Returns the Gmail label ID for the given label name, creating it if it doesn't exist.
+     * Caches the label ID in memory so repeated calls within the same sync session
+     * return the cached value without additional API calls.
+     * Throws on error — the label ID is required before the processing loop.
+     * @param {string} labelName - The label name to find or create
+     * @returns {Promise<string>} The label ID
+     */
+    async getOrCreateLabel(labelName) {
+        if (this._labelCache[labelName]) {
+            return this._labelCache[labelName];
+        }
+
+        const res = await this.gmail.users.labels.list({ userId: "me" });
+        const labels = res.data.labels || [];
+        const existing = labels.find((l) => l.name === labelName);
+
+        if (existing) {
+            this._labelCache[labelName] = existing.id;
+            return existing.id;
+        }
+
+        const createRes = await this.gmail.users.labels.create({
+            userId: "me",
+            requestBody: {
+                name: labelName,
+                labelListVisibility: "labelShow",
+                messageListVisibility: "show",
+            },
+        });
+
+        this._labelCache[labelName] = createRes.data.id;
+        return createRes.data.id;
+    }
+
+    /**
+     * Adds a label to a Gmail message.
+     * Non-fatal: logs error and continues on failure.
+     * @param {string} messageId - The Gmail message ID
+     * @param {string} labelId - The label ID to add
+     */
+    async addLabel(messageId, labelId) {
+        try {
+            await this.gmail.users.messages.modify({
+                userId: "me",
+                id: messageId,
+                requestBody: {
+                    addLabelIds: [labelId],
+                },
+            });
+        } catch (error) {
+            console.error(`Gmail addLabel Error for message ${messageId}:`, error);
+        }
+    }
+
+
+
 }
 
 

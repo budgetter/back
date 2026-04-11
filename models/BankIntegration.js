@@ -27,6 +27,26 @@ const BankIntegration = sequelize.define('BankIntegration', {
     isActive: {
         type: DataTypes.BOOLEAN,
         defaultValue: true,
+    },
+    syncDaysBack: {
+        type: DataTypes.INTEGER,
+        defaultValue: 30,
+        validate: {
+            min: 1,
+            max: 90,
+        },
+    },
+    unreadOnly: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+    },
+    markAsRead: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+    },
+    addLabel: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: true,
     }
 }, {
     tableName: 'BankIntegrations',

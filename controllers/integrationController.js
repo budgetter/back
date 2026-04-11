@@ -21,7 +21,7 @@ async function connectGmail(req, res, next) {
         });
 
         passport.authenticate("google", {
-            scope: ["profile", "email", "https://www.googleapis.com/auth/gmail.readonly"],
+            scope: ["profile", "email", "https://www.googleapis.com/auth/gmail.modify"],
             accessType: "offline",
             prompt: "consent",
             state: JSON.stringify({ userId: req.user.id, nonce })
@@ -129,7 +129,11 @@ async function getSettings(req, res) {
             connected: true,
             email: integration.email,
             lastSync: integration.lastSync,
-            maps: integration.IntegrationMaps // { bankParameter, walletId, defaultCategoryId }
+            maps: integration.IntegrationMaps, // { bankParameter, walletId, defaultCategoryId }
+            syncDaysBack: integration.syncDaysBack,
+            unreadOnly: integration.unreadOnly,
+            markAsRead: integration.markAsRead,
+            addLabel: integration.addLabel
         });
     } catch (error) {
         console.error("Get Settings Error:", error);
@@ -176,6 +180,46 @@ async function updateSettings(req, res) {
     }
 }
 
+async function updatePreferences(req, res) {
+    try {
+        const { syncDaysBack, unreadOnly, markAsRead, addLabel } = req.body;
+
+        // Validate syncDaysBack if provided
+        if (syncDaysBack !== undefined) {
+            if (!Number.isInteger(syncDaysBack) || syncDaysBack < 1 || syncDaysBack > 90) {
+                return res.status(400).json({ message: "syncDaysBack must be between 1 and 90" });
+            }
+        }
+
+        const integration = await BankIntegration.findOne({
+            where: { userId: req.user.id, provider: 'Gmail' }
+        });
+
+        if (!integration) {
+            return res.status(404).json({ message: "Integration not found" });
+        }
+
+        // Defense-in-depth: explicit ownership check
+        if (integration.userId !== req.user.id) {
+            return res.status(403).json({ message: "Forbidden" });
+        }
+
+        // Update only provided fields
+        if (syncDaysBack !== undefined) integration.syncDaysBack = syncDaysBack;
+        if (unreadOnly !== undefined) integration.unreadOnly = unreadOnly;
+        if (markAsRead !== undefined) integration.markAsRead = markAsRead;
+        if (addLabel !== undefined) integration.addLabel = addLabel;
+
+        await integration.save();
+
+        return res.json({ message: "Preferences updated" });
+    } catch (error) {
+        console.error("Update Preferences Error:", error);
+        res.status(500).json({ message: "Server error" });
+    }
+}
+
+
 async function syncNow(req, res) {
     let processedCount = 0;
     let createdCount = 0;
@@ -206,11 +250,29 @@ async function syncNow(req, res) {
         const gmailService = new GmailService(refreshToken);
 
         // Define search queries based on supported banks
-        const queries = [
+        const baseQueries = [
             'from:colpatriaInforma@scotiabankcolpatria.com',
             'from:alertasynotificaciones@notificacionesbancolombia.com',
             'from:alertasynotificaciones@bancolombia.com.co'
         ];
+
+        // Compute date filter from syncDaysBack preference
+        const syncDays = integration.syncDaysBack || 30;
+        const sinceDate = new Date();
+        sinceDate.setDate(sinceDate.getDate() - syncDays);
+        const yyyy = sinceDate.getFullYear();
+        const mm = String(sinceDate.getMonth() + 1).padStart(2, '0');
+        const dd = String(sinceDate.getDate()).padStart(2, '0');
+        const dateFilter = `after:${yyyy}/${mm}/${dd}`;
+
+        // Build final queries with date filter and optional unread filter
+        const queries = baseQueries.map(q => {
+            let query = `${q} ${dateFilter}`;
+            if (integration.unreadOnly === true) {
+                query += ' is:unread';
+            }
+            return query;
+        });
 
         // Collect all messages across queries, limit total to 50
         const MAX_MESSAGES = 50;
@@ -238,6 +300,17 @@ async function syncNow(req, res) {
 
         // Enforce max 50 total
         allMessages = allMessages.slice(0, MAX_MESSAGES);
+
+        // Pre-fetch label ID if addLabel is enabled (once before the loop)
+        let budgetterLabelId = null;
+        if (integration.addLabel === true) {
+            try {
+                budgetterLabelId = await gmailService.getOrCreateLabel("Budgetter");
+            } catch (labelError) {
+                console.error("Failed to get/create Budgetter label, skipping labeling:", labelError.message);
+                // Skip all labeling but continue sync
+            }
+        }
 
         // Process each message with per-message timeout and error isolation
         for (const msgMeta of allMessages) {
@@ -300,12 +373,32 @@ async function syncNow(req, res) {
                                         type: result.type,
                                         categoryId: categoryId,
                                         UserId: req.user.id,
-                                        walletId: map.walletId
+                                        walletId: map.walletId,
+                                        source: 'email_sync'
                                     }, { transaction: t });
                                 });
 
                                 createdCount++;
                                 processedCount++;
+
+                                // Post-processing: mark as read
+                                if (integration.markAsRead === true) {
+                                    try {
+                                        await gmailService.markAsRead(msgMeta.id);
+                                    } catch (markError) {
+                                        console.error(`Failed to mark message ${msgMeta.id} as read:`, markError.message);
+                                    }
+                                }
+
+                                // Post-processing: add Budgetter label
+                                if (integration.addLabel === true && budgetterLabelId) {
+                                    try {
+                                        await gmailService.addLabel(msgMeta.id, budgetterLabelId);
+                                    } catch (labelError) {
+                                        console.error(`Failed to add label to message ${msgMeta.id}:`, labelError.message);
+                                    }
+                                }
+
                                 return;
                             }
                         }
@@ -387,5 +480,6 @@ module.exports = {
     gmailCallback,
     getSettings,
     updateSettings,
+    updatePreferences,
     syncNow
 };

@@ -27,6 +27,11 @@ const Transaction = sequelize.define('Transaction', {
     type: DataTypes.UUID,
     allowNull: true,
   },
+  source: {
+    type: DataTypes.ENUM('manual', 'email_sync'),
+    allowNull: false,
+    defaultValue: 'manual',
+  },
 }, {
   tableName: 'transactions',
   timestamps: true,
