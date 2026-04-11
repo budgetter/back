@@ -1,24 +1,76 @@
+const crypto = require('crypto');
 const { google } = require("googleapis");
 const passport = require("passport");
-const { BankIntegration, IntegrationMap, ProcessedEmail, Transaction, Wallet, Category } = require("../models");
+const { BankIntegration, IntegrationMap, ProcessedEmail, Transaction, Wallet, Category, OAuthNonce, sequelize } = require("../models");
 const GmailService = require("../services/gmailService");
 const BankParsers = require("../parsers/BankParsers");
 const { v4: uuidv4 } = require('uuid');
 const { encrypt, decrypt } = require("../utils/encryption");
 
 async function connectGmail(req, res, next) {
-    passport.authenticate("google", {
-        scope: ["profile", "email", "https://www.googleapis.com/auth/gmail.readonly"],
-        accessType: "offline",
-        prompt: "consent", // Force refresh token
-        state: JSON.stringify({ userId: req.user.id, action: "connect_gmail" }) // Pass state to callback
-    })(req, res, next);
+    try {
+        // Generate cryptographic nonce for CSRF protection
+        const nonce = crypto.randomBytes(32).toString('hex');
+
+        // Store nonce in OAuthNonce table with 10-minute expiry
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+        await OAuthNonce.create({
+            userId: req.user.id,
+            nonce,
+            expiresAt,
+        });
+
+        passport.authenticate("google", {
+            scope: ["profile", "email", "https://www.googleapis.com/auth/gmail.readonly"],
+            accessType: "offline",
+            prompt: "consent",
+            state: JSON.stringify({ userId: req.user.id, nonce })
+        })(req, res, next);
+    } catch (error) {
+        console.error("Connect Gmail Error:", error);
+        res.redirect(`${process.env.ORIGIN_URL}/settings/integrations?status=error`);
+    }
 }
 
 async function gmailCallback(req, res) {
     const { code, state } = req.query;
 
     try {
+        // Validate callback URL uses HTTPS in production
+        if (process.env.NODE_ENV === 'production' && !process.env.ORIGIN_URL?.startsWith('https://')) {
+            console.error("OAuth callback rejected: ORIGIN_URL must use HTTPS in production");
+            return res.redirect(`${process.env.ORIGIN_URL}/settings/integrations?status=error`);
+        }
+
+        // Parse and validate state parameter
+        if (!state) {
+            return res.status(403).redirect(`${process.env.ORIGIN_URL}/settings/integrations?status=error`);
+        }
+
+        const parsed = JSON.parse(state);
+        const { userId, nonce } = parsed;
+
+        if (!userId || !nonce) {
+            return res.status(403).redirect(`${process.env.ORIGIN_URL}/settings/integrations?status=error`);
+        }
+
+        // Validate nonce against OAuthNonce table
+        const storedNonce = await OAuthNonce.findOne({
+            where: { nonce, userId }
+        });
+
+        if (!storedNonce || storedNonce.expiresAt < new Date()) {
+            // Nonce not found or expired — CSRF protection triggered
+            if (storedNonce) {
+                await storedNonce.destroy(); // Clean up expired nonce
+            }
+            console.error("OAuth callback rejected: invalid or expired nonce");
+            return res.status(403).redirect(`${process.env.ORIGIN_URL}/settings/integrations?status=error`);
+        }
+
+        // Delete nonce after successful validation to prevent replay attacks
+        await storedNonce.destroy();
+
         const oauth2Client = new google.auth.OAuth2(
             process.env.GOOGLE_CLIENT_ID,
             process.env.GOOGLE_CLIENT_SECRET,
@@ -30,14 +82,6 @@ async function gmailCallback(req, res) {
 
         const oauth2 = google.oauth2({ version: "v2", auth: oauth2Client });
         const userInfo = await oauth2.userinfo.get();
-
-        let userId = null;
-        if (state) {
-            const parsed = JSON.parse(state);
-            userId = parsed.userId;
-        }
-
-        if (!userId) throw new Error("User context lost");
 
         // Encrypt refresh token
         const encryptedToken = tokens.refresh_token ? encrypt(tokens.refresh_token) : null;
@@ -76,6 +120,11 @@ async function getSettings(req, res) {
 
         if (!integration) return res.json({ connected: false });
 
+        // Defense-in-depth: explicit ownership check
+        if (integration.userId !== req.user.id) {
+            return res.status(403).json({ message: "Forbidden" });
+        }
+
         return res.json({
             connected: true,
             email: integration.email,
@@ -94,6 +143,11 @@ async function updateSettings(req, res) {
         const integration = await BankIntegration.findOne({ where: { userId: req.user.id, provider: 'Gmail' } });
 
         if (!integration) return res.status(404).json({ message: "Integration not found" });
+
+        // Defense-in-depth: explicit ownership check
+        if (integration.userId !== req.user.id) {
+            return res.status(403).json({ message: "Forbidden" });
+        }
 
         // Upsert maps
         for (const map of maps) {
@@ -125,6 +179,8 @@ async function updateSettings(req, res) {
 async function syncNow(req, res) {
     let processedCount = 0;
     let createdCount = 0;
+    let skippedCount = 0;
+    let failedCount = 0;
 
     try {
         const integration = await BankIntegration.findOne({
@@ -134,6 +190,11 @@ async function syncNow(req, res) {
 
         if (!integration || !integration.isActive || !integration.refreshToken) {
             return res.status(400).json({ message: "Integration not active" });
+        }
+
+        // Defense-in-depth: explicit ownership check
+        if (integration.userId !== req.user.id) {
+            return res.status(403).json({ message: "Forbidden" });
         }
 
         // Decrypt Token
@@ -151,53 +212,86 @@ async function syncNow(req, res) {
             'from:alertasynotificaciones@bancolombia.com.co'
         ];
 
-        for (const q of queries) {
-            // Find messages. For now limiting to 20 recent
-            const messages = await gmailService.listMessages(`${q} -label:TRASH`);
+        // Collect all messages across queries, limit total to 50
+        const MAX_MESSAGES = 50;
+        let allMessages = [];
 
-            for (const msgMeta of messages) {
-                // Check if already processed
+        for (const q of queries) {
+            if (allMessages.length >= MAX_MESSAGES) break;
+
+            let messages;
+            try {
+                const remaining = MAX_MESSAGES - allMessages.length;
+                messages = await gmailService.listMessages(`${q} -label:TRASH`, remaining);
+            } catch (listError) {
+                // Token error detection: mark inactive and return requiresReauth
+                if (gmailService.isTokenError(listError)) {
+                    integration.isActive = false;
+                    await integration.save();
+                    return res.json({ requiresReauth: true, message: "Token expired or revoked. Please re-authorize." });
+                }
+                throw listError;
+            }
+
+            allMessages = allMessages.concat(messages);
+        }
+
+        // Enforce max 50 total
+        allMessages = allMessages.slice(0, MAX_MESSAGES);
+
+        // Process each message with per-message timeout and error isolation
+        for (const msgMeta of allMessages) {
+            const processMessage = async () => {
+                // Check if already processed — skip if exists
                 const isProcessed = await ProcessedEmail.findOne({
                     where: { integrationId: integration.id, messageId: msgMeta.id }
                 });
 
-                if (isProcessed) continue;
+                if (isProcessed) {
+                    skippedCount++;
+                    return;
+                }
 
-                try {
-                    const msg = await gmailService.getMessage(msgMeta.id);
-                    const body = gmailService.extractBody(msg.payload);
-                    const internalDate = parseInt(msg.internalDate);
+                const msg = await gmailService.getMessage(msgMeta.id);
+                const body = gmailService.extractBody(msg.payload);
+                const internalDate = parseInt(msg.internalDate);
 
-                    // Get header From
-                    let fromHeader = '';
-                    if (msg.payload.headers) {
-                        const h = msg.payload.headers.find(h => h.name === 'From');
-                        if (h) fromHeader = h.value;
-                    }
+                // Get header From
+                let fromHeader = '';
+                if (msg.payload.headers) {
+                    const h = msg.payload.headers.find(h => h.name === 'From');
+                    if (h) fromHeader = h.value;
+                }
 
-                    // Parse
-                    const parserFunc = BankParsers.getParser(fromHeader);
-                    if (parserFunc) {
-                        const result = parserFunc(body, internalDate);
+                // Parse
+                const parserFunc = BankParsers.getParser(fromHeader);
+                if (parserFunc) {
+                    const result = parserFunc(body, internalDate);
 
-                        if (result) {
-                            // Find Mapping for this bank
-                            let map = integration.IntegrationMaps.find(m => m.bankParameter === result.parserId);
+                    if (result) {
+                        // Find Mapping for this bank
+                        let map = integration.IntegrationMaps.find(m => m.bankParameter === result.parserId);
 
-                            // User needs to configure. If not configured, we can't create transaction safely (no wallet)
-                            if (map && map.walletId) {
-                                let categoryId = map.defaultCategoryId;
+                        if (map && map.walletId) {
+                            let categoryId = map.defaultCategoryId;
 
-                                // Try to infer category from parser result
-                                if (result.rawCategory && result.rawCategory !== 'Unknown') {
-                                    // fuzzy match name? or exact?
-                                    const cat = await Category.findOne({
-                                        where: { name: result.rawCategory }
-                                    });
-                                    if (cat) categoryId = cat.id;
-                                }
+                            // Try to infer category from parser result
+                            if (result.rawCategory && result.rawCategory !== 'Unknown') {
+                                const cat = await Category.findOne({
+                                    where: { name: result.rawCategory }
+                                });
+                                if (cat) categoryId = cat.id;
+                            }
 
-                                if (categoryId) {
+                            if (categoryId) {
+                                // Atomic write: ProcessedEmail + Transaction in a single transaction
+                                await sequelize.transaction(async (t) => {
+                                    await ProcessedEmail.create({
+                                        id: uuidv4(),
+                                        integrationId: integration.id,
+                                        messageId: msgMeta.id
+                                    }, { transaction: t });
+
                                     await Transaction.create({
                                         id: uuidv4(),
                                         amount: result.amount,
@@ -207,42 +301,86 @@ async function syncNow(req, res) {
                                         categoryId: categoryId,
                                         UserId: req.user.id,
                                         walletId: map.walletId
-                                    });
-                                    createdCount++;
-                                }
+                                    }, { transaction: t });
+                                });
+
+                                createdCount++;
+                                processedCount++;
+                                return;
                             }
                         }
                     }
-
-                    // Success or skipped (no parser/map), mark processed
-                    await ProcessedEmail.create({
-                        id: uuidv4(),
-                        integrationId: integration.id,
-                        messageId: msgMeta.id
-                    });
-                    processedCount++;
-
-                } catch (innerError) {
-                    console.error(`Error processing msg ${msgMeta.id}:`, innerError);
-                    // Continue to next message
                 }
+
+                // No parser match, no mapping, or no category — still mark as processed
+                await ProcessedEmail.create({
+                    id: uuidv4(),
+                    integrationId: integration.id,
+                    messageId: msgMeta.id
+                });
+                processedCount++;
+            };
+
+            try {
+                // Per-message 10-second timeout
+                const timeoutPromise = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('Message processing timeout')), 10000)
+                );
+                await Promise.race([processMessage(), timeoutPromise]);
+            } catch (msgError) {
+                // Handle unique constraint violations gracefully — skip, don't crash
+                if (msgError.name === 'SequelizeUniqueConstraintError') {
+                    skippedCount++;
+                    continue;
+                }
+
+                // Log error with message ID but never expose refresh token values
+                const safeMessage = msgError.message ? msgError.message.replace(/refresh_token[^\s]*/gi, '[REDACTED]') : 'Unknown error';
+                console.error(`Error processing message ${msgMeta.id}: ${safeMessage}`);
+                failedCount++;
+                // Continue processing remaining messages
             }
         }
 
-        integration.lastSync = new Date();
-        await integration.save();
+        // Only update lastSync if at least one message was processed successfully
+        if (processedCount > 0) {
+            integration.lastSync = new Date();
+            await integration.save();
+        }
 
         return res.json({
             message: "Sync complete",
             processed: processedCount,
-            created: createdCount
+            created: createdCount,
+            skipped: skippedCount,
+            failed: failedCount
         });
 
     } catch (error) {
-        console.error("Sync Main Error:", error);
+        // Outer catch: token error detection for any uncaught token errors
+        const isTokenErr = (error.code === 401) || (error.message && error.message.includes('invalid_grant'));
+        if (isTokenErr) {
+            try {
+                const integration = await BankIntegration.findOne({
+                    where: { userId: req.user.id, provider: 'Gmail' }
+                });
+                if (integration) {
+                    integration.isActive = false;
+                    await integration.save();
+                }
+            } catch (saveErr) {
+                console.error("Failed to deactivate integration:", saveErr.message);
+            }
+            return res.json({ requiresReauth: true, message: "Token expired or revoked. Please re-authorize." });
+        }
+
+        // Never log refresh token values
+        const safeMessage = error.message ? error.message.replace(/refresh_token[^\s]*/gi, '[REDACTED]') : 'Unknown error';
+        console.error("Sync Main Error:", safeMessage);
         res.status(500).json({ message: "Server error during sync" });
     }
 }
+
 
 module.exports = {
     connectGmail,

@@ -12,17 +12,42 @@ class GmailService {
         this.gmail = google.gmail({ version: "v1", auth: this.oAuth2Client });
     }
 
-    async listMessages(query) {
+    /**
+     * Checks if an error is a token-related error (401 or invalid_grant).
+     * @param {Error} error - The error to check
+     * @returns {boolean} True if the error indicates a token issue
+     */
+    isTokenError(error) {
+        if (!error) return false;
+        if (error.code === 401) return true;
+        if (error.message && error.message.includes('invalid_grant')) return true;
+        return false;
+    }
+
+    async listMessages(query, maxResults = 50) {
         try {
-            // Default to last 30 days if no date specified in query, but standard query syntax applies
-            // Example query: 'from:colpatriaInforma@scotiabankcolpatria.com after:2024/01/01'
             const res = await this.gmail.users.messages.list({
                 userId: "me",
                 q: query,
-                maxResults: 20 // Limit batch size
+                maxResults
             });
             return res.data.messages || [];
         } catch (error) {
+            // If it's a token error, attempt one automatic refresh and retry
+            if (this.isTokenError(error)) {
+                try {
+                    await this.oAuth2Client.getAccessToken();
+                    const res = await this.gmail.users.messages.list({
+                        userId: "me",
+                        q: query,
+                        maxResults
+                    });
+                    return res.data.messages || [];
+                } catch (retryError) {
+                    console.error("Gmail List Error after token refresh retry:", retryError);
+                    throw retryError;
+                }
+            }
             console.error("Gmail List Error:", error);
             throw error;
         }
@@ -64,5 +89,6 @@ class GmailService {
         return body;
     }
 }
+
 
 module.exports = GmailService;

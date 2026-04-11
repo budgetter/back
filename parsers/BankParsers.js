@@ -1,5 +1,4 @@
-
-// Optional: Consider using cheerio or simple DOM parsing if available, but for now regex as per user request/simplicity
+const MAX_BODY_SIZE = 512000; // 500KB in bytes
 
 class BankParsers {
 
@@ -12,16 +11,82 @@ class BankParsers {
         return null;
     }
 
+    /**
+     * Lightweight HTML sanitizer — no jsdom/DOMPurify dependency.
+     * Strips dangerous tags and on* event handler attributes.
+     * Safe for serverless environments (no filesystem reads).
+     */
+    static sanitizeHtml(body) {
+        if (!body || typeof body !== 'string') {
+            return null;
+        }
+
+        const bodySize = Buffer.byteLength(body, 'utf8');
+        if (bodySize > MAX_BODY_SIZE) {
+            console.warn(`Email body exceeds 500KB limit (${bodySize} bytes). Skipping sanitization.`);
+            return null;
+        }
+
+        let sanitized = body;
+
+        // Strip <script>...</script> tags and content
+        sanitized = sanitized.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+        // Strip <object>, <embed>, <iframe> tags and content
+        sanitized = sanitized.replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '');
+        sanitized = sanitized.replace(/<embed\b[^>]*\/?>/gi, '');
+        sanitized = sanitized.replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '');
+        // Strip on* event handler attributes (e.g., onclick, onerror, onload)
+        sanitized = sanitized.replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+
+        return sanitized;
+    }
+
+    static validateAmount(amount) {
+        return Number.isFinite(amount) && amount > 0 && amount < 1_000_000_000;
+    }
+
+    static validateDate(date) {
+        if (!(date instanceof Date) || isNaN(date.getTime())) {
+            return false;
+        }
+        const now = new Date();
+        const oneYearAgo = new Date(now);
+        oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+        const oneDayFuture = new Date(now);
+        oneDayFuture.setDate(oneDayFuture.getDate() + 1);
+        return date >= oneYearAgo && date <= oneDayFuture;
+    }
+
+    static _checkTimeout(startTime, context) {
+        const elapsed = Date.now() - startTime;
+        if (elapsed > 2000) {
+            console.warn(`Regex timeout exceeded (${elapsed}ms) while parsing ${context}. Aborting.`);
+            return true;
+        }
+        return false;
+    }
+
+
     static parseColpatria(body, date) {
+        const startTime = Date.now();
         try {
+            body = BankParsers.sanitizeHtml(body);
+            if (body === null) return null;
+
+            if (BankParsers._checkTimeout(startTime, 'Colpatria')) return null;
+
             // Basic HTML stripping for body content analysis if regex fails on raw HTML
             const tableRegex = /<table.*?>([\s\S]*?)<\/table>/i;
             const tableMatch = body.match(tableRegex);
+
+            if (BankParsers._checkTimeout(startTime, 'Colpatria')) return null;
 
             if (tableMatch) {
                 const tableContent = tableMatch[1];
                 const rowRegex = /<tr.*?>([\s\S]*?)<\/tr>/gi;
                 const rows = tableContent.match(rowRegex);
+
+                if (BankParsers._checkTimeout(startTime, 'Colpatria')) return null;
 
                 // Usually row 1 is header, row 2 is data
                 if (rows && rows.length > 1) {
@@ -35,12 +100,25 @@ class BankParsers {
                         extractedData.push(dataMatch[1].replace(/<.*?>/g, '').trim());
                     }
 
+                    if (BankParsers._checkTimeout(startTime, 'Colpatria')) return null;
+
                     if (extractedData.length >= 4) {
                         // Index 0: Comercio (Store)
                         // Index 1: Valor (Amount)
                         const store = extractedData[0];
                         const amountStr = extractedData[1].replace(/,/g, '');
                         const amount = parseFloat(amountStr);
+
+                        if (!BankParsers.validateAmount(amount)) {
+                            console.warn(`Invalid amount parsed from Colpatria email: ${amount}`);
+                            return null;
+                        }
+
+                        const parsedDate = new Date(date);
+                        if (!BankParsers.validateDate(parsedDate)) {
+                            console.warn(`Invalid date parsed from Colpatria email: ${parsedDate}`);
+                            return null;
+                        }
 
                         let categoryName = "Unknown";
                         if (store.toLowerCase().includes("didi")) categoryName = "Mother"; // User logic
@@ -49,7 +127,7 @@ class BankParsers {
                         return {
                             amount,
                             description: store,
-                            date: new Date(date),
+                            date: parsedDate,
                             type: "expense",
                             currency: "COP",
                             parserId: "Colpatria",
@@ -64,8 +142,15 @@ class BankParsers {
         return null;
     }
 
+
     static parseBancolombia(body, date) {
+        const startTime = Date.now();
         try {
+            body = BankParsers.sanitizeHtml(body);
+            if (body === null) return null;
+
+            if (BankParsers._checkTimeout(startTime, 'Bancolombia')) return null;
+
             let amount = 0;
             let description = "Bancolombia Transaction";
             let type = "expense";
@@ -101,10 +186,6 @@ class BankParsers {
                     else if (personName.includes("SISTEMAS COLOMB")) categoryName = "Bonus";
                     else categoryName = "Income";
 
-                    // Amount format varies, usually $50,000 or $50.000 depending on locale, user script regex uses comma removal for thousands?
-                    // Actually Bancolombia usually uses dots for thousands and comma for decimals or just integers. 
-                    // User script: body.match(/\$([\d,]+)/) and replace /,/g with '' -> implies 50,000.00 format? 
-                    // Let's stick to user script logic:
                     const amountMatch = body.match(/\$([\d,]+)/);
                     if (amountMatch) amount = parseFloat(amountMatch[1].replace(/,/g, ''));
                 }
@@ -139,11 +220,24 @@ class BankParsers {
                 }
             }
 
+            if (BankParsers._checkTimeout(startTime, 'Bancolombia')) return null;
+
             if (amount > 0) {
+                if (!BankParsers.validateAmount(amount)) {
+                    console.warn(`Invalid amount parsed from Bancolombia email: ${amount}`);
+                    return null;
+                }
+
+                const parsedDate = new Date(date);
+                if (!BankParsers.validateDate(parsedDate)) {
+                    console.warn(`Invalid date parsed from Bancolombia email: ${parsedDate}`);
+                    return null;
+                }
+
                 return {
                     amount,
                     description,
-                    date: new Date(date),
+                    date: parsedDate,
                     type,
                     currency: "COP",
                     parserId: "Bancolombia",
@@ -156,6 +250,7 @@ class BankParsers {
         }
         return null;
     }
+
 }
 
 module.exports = BankParsers;

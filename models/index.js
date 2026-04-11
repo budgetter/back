@@ -14,6 +14,10 @@ const Debt = require("./Debt");
 const BudgetSection = require("./BudgetSection");
 const Wallet = require("./Wallet");
 const TransactionSplit = require("./TransactionSplit");
+const OAuthNonce = require("./OAuthNonce");
+const BankIntegration = require("./BankIntegration");
+const IntegrationMap = require("./IntegrationMap");
+const ProcessedEmail = require("./ProcessedEmail");
 
 /* 
    Users and Groups are linked via UserGroup, which includes a Role.
@@ -108,6 +112,18 @@ Group.hasMany(Debt, { foreignKey: "groupId" });
 Wallet.belongsTo(User, { foreignKey: "userId" });
 User.hasMany(Wallet, { foreignKey: "userId" });
 
+// OAuthNonce associations
+OAuthNonce.belongsTo(User, { foreignKey: "userId" });
+User.hasMany(OAuthNonce, { foreignKey: "userId" });
+
+// BankIntegration associations
+BankIntegration.belongsTo(User, { foreignKey: "userId" });
+User.hasMany(BankIntegration, { foreignKey: "userId" });
+BankIntegration.hasMany(IntegrationMap, { foreignKey: "integrationId" });
+IntegrationMap.belongsTo(BankIntegration, { foreignKey: "integrationId" });
+BankIntegration.hasMany(ProcessedEmail, { foreignKey: "integrationId" });
+ProcessedEmail.belongsTo(BankIntegration, { foreignKey: "integrationId" });
+
 module.exports = {
   sequelize,
   User,
@@ -125,4 +141,8 @@ module.exports = {
   Debt,
   Wallet,
   TransactionSplit,
+  OAuthNonce,
+  BankIntegration,
+  IntegrationMap,
+  ProcessedEmail,
 };
