@@ -45,7 +45,7 @@ async function updateProfile(req, res) {
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-    const { name, email } = req.body;
+    const { name, email, budgetSplitMode } = req.body;
 
     // Update fields if provided
     if (name) {
@@ -58,6 +58,9 @@ async function updateProfile(req, res) {
         return res.status(400).json({ message: "Email already in use" });
       }
       user.email = email;
+    }
+    if (budgetSplitMode && ['total', 'split_only'].includes(budgetSplitMode)) {
+      user.budgetSplitMode = budgetSplitMode;
     }
     await user.save();
 

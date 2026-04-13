@@ -20,6 +20,12 @@ const User = sequelize.define('User', {
     type: DataTypes.STRING,
     allowNull: false,
   },
+  budgetSplitMode: {
+    type: DataTypes.ENUM('total', 'split_only'),
+    allowNull: false,
+    defaultValue: 'total',
+    comment: 'total = full amount counts in budget, split_only = only your split portion counts',
+  },
   // Additional profile fields can be added here.
 }, {
   tableName: 'users',

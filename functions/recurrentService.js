@@ -1,4 +1,4 @@
-const { Transaction, RecurrentPayment } = require("../models");
+const { Transaction, RecurrentPayment, RecurrentSplitConfig, TransactionSplit, SplitInvitation, User } = require("../models");
 const { v4: uuidv4 } = require("uuid");
 
 function calculateNextDate(currentDateStr, frequency) {
@@ -52,10 +52,16 @@ async function syncUserRecurrentPayments(userId) {
             let nextDate = rp.nextPaymentDate;
             let updated = false;
 
+            // Fetch split config once per recurrent payment (cache outside the while loop)
+            const splitConfig = await RecurrentSplitConfig.findOne({
+                where: { recurrentPaymentId: rp.id },
+            });
+
             while (nextDate <= today) {
                 // Create the transaction
+                const transactionId = uuidv4();
                 await Transaction.create({
-                    id: uuidv4(),
+                    id: transactionId,
                     amount: rp.amount,
                     description: rp.description || "Recurrent Payment",
                     date: nextDate,
@@ -66,6 +72,90 @@ async function syncUserRecurrentPayments(userId) {
                     walletId: rp.walletId,
                     recurrentPaymentId: rp.id,
                 });
+
+                // Generate splits if a RecurrentSplitConfig exists
+                if (splitConfig) {
+                    const participants = splitConfig.participants || [];
+                    const splitMode = splitConfig.splitMode || "even";
+
+                    // Calculate amounts per participant
+                    let resolvedParticipants = [];
+
+                    if (splitMode === "even") {
+                        const N = participants.length + 1; // participants + owner
+                        const perPerson = Math.floor((rp.amount * 100) / N) / 100;
+
+                        for (let i = 0; i < participants.length; i++) {
+                            const amount =
+                                i === participants.length - 1
+                                    ? Math.round((rp.amount - perPerson * (N - 1)) * 100) / 100
+                                    : perPerson;
+
+                            resolvedParticipants.push({
+                                userId: participants[i].userId || null,
+                                email: participants[i].email || null,
+                                amount,
+                            });
+                        }
+                    } else {
+                        // Custom mode: use stored amounts directly
+                        for (const p of participants) {
+                            resolvedParticipants.push({
+                                userId: p.userId || null,
+                                email: p.email || null,
+                                amount: p.amount,
+                            });
+                        }
+                    }
+
+                    // Create TransactionSplit or SplitInvitation for each participant
+                    for (const participant of resolvedParticipants) {
+                        let participantUserId = participant.userId;
+
+                        // If email provided but no userId, try to resolve
+                        if (!participantUserId && participant.email) {
+                            const existingUser = await User.findOne({
+                                where: { email: participant.email },
+                            });
+                            if (existingUser) {
+                                participantUserId = existingUser.id;
+                            }
+                        }
+
+                        if (participantUserId) {
+                            // Registered user — create TransactionSplit directly
+                            await TransactionSplit.create({
+                                id: uuidv4(),
+                                transactionId,
+                                userId: participantUserId,
+                                amount: participant.amount,
+                                isPaid: false,
+                                splitMode,
+                            });
+                        } else if (participant.email) {
+                            // Unregistered user — create SplitInvitation + linked TransactionSplit
+                            const invitation = await SplitInvitation.create({
+                                id: uuidv4(),
+                                transactionId,
+                                email: participant.email,
+                                amount: participant.amount,
+                                splitMode,
+                                status: "pending",
+                                invitedBy: rp.userId,
+                            });
+
+                            await TransactionSplit.create({
+                                id: uuidv4(),
+                                transactionId,
+                                userId: null,
+                                amount: participant.amount,
+                                isPaid: false,
+                                splitMode,
+                                invitationId: invitation.id,
+                            });
+                        }
+                    }
+                }
 
                 // Calculate next occurrence
                 nextDate = calculateNextDate(nextDate, rp.frequency);

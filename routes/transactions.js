@@ -11,8 +11,6 @@ router.get('/:groupId', authenticateToken, transactionController.getTransactions
 
 router.put('/:transactionId', authenticateToken, transactionController.updateTransaction);
 
-// Split Settlement
-router.post('/split/:splitId/settle', authenticateToken, transactionController.settleSplit);
 
 router.delete('/:transactionId', authenticateToken, transactionController.deleteTransaction);
 

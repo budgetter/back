@@ -15,8 +15,8 @@ const TransactionSplit = sequelize.define(
         },
         userId: {
             type: DataTypes.UUID,
-            allowNull: false,
-            comment: "The user who owes the money (debtor)",
+            allowNull: true,
+            comment: "The user who owes the money (debtor). Nullable to support unresolved invitations.",
         },
         amount: {
             type: DataTypes.DECIMAL(10, 2),
@@ -33,6 +33,16 @@ const TransactionSplit = sequelize.define(
         proofOfPayment: {
             type: DataTypes.STRING,
             allowNull: true,
+        },
+        splitMode: {
+            type: DataTypes.ENUM("even", "custom"),
+            allowNull: false,
+            defaultValue: "even",
+        },
+        invitationId: {
+            type: DataTypes.UUID,
+            allowNull: true,
+            comment: "FK to SplitInvitation for unresolved email-based splits",
         },
     },
     {

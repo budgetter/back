@@ -41,6 +41,7 @@ const categoriesRoutes = require("./routes/categories");
 const walletRoutes = require("./routes/wallets"); // Added wallets route
 const dashboardRoutes = require("./routes/dashboard");
 const integrationRoutes = require("./routes/integration");
+const splitRoutes = require("./routes/splits");
 
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
@@ -55,6 +56,7 @@ app.use("/api/categories", categoriesRoutes);
 app.use("/api/wallets", walletRoutes); // Register wallets route
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/integration", integrationRoutes);
+app.use("/api/splits", splitRoutes);
 
 app.get("/api/", (req, res) => {
   res.status(200).send("API is running");
@@ -93,7 +95,8 @@ const initializeDatabase = async () => {
         });
       });
       // Run seeders
-      await defaultCategoriesSeeder.up(sequelize.getQueryInterface());
+      const { Sequelize } = require('sequelize');
+      await defaultCategoriesSeeder.up(sequelize.getQueryInterface(), Sequelize);
       console.log("Default categories seeded successfully.");
     }
   } catch (error) {

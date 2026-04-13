@@ -11,6 +11,7 @@ const debtRoutes = require("./routes/debts");
 const dashboardRoutes = require("./routes/dashboard");
 const groupRoutes = require("./routes/groups");
 const integrationRoutes = require("./routes/integration");
+const splitRoutes = require("./routes/splits");
 
 // Validate encryption key is set before starting the app
 validateEncryptionKey();
@@ -31,6 +32,7 @@ app.use("/api/debts", debtRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/groups", groupRoutes);
 app.use("/api/integration", integrationRoutes);
+app.use("/api/splits", splitRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

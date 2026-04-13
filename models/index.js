@@ -18,6 +18,9 @@ const OAuthNonce = require("./OAuthNonce");
 const BankIntegration = require("./BankIntegration");
 const IntegrationMap = require("./IntegrationMap");
 const ProcessedEmail = require("./ProcessedEmail");
+const SplitInvitation = require("./SplitInvitation");
+const FriendContact = require("./FriendContact");
+const RecurrentSplitConfig = require("./RecurrentSplitConfig");
 
 /* 
    Users and Groups are linked via UserGroup, which includes a Role.
@@ -124,6 +127,25 @@ IntegrationMap.belongsTo(BankIntegration, { foreignKey: "integrationId" });
 BankIntegration.hasMany(ProcessedEmail, { foreignKey: "integrationId" });
 ProcessedEmail.belongsTo(BankIntegration, { foreignKey: "integrationId" });
 
+// SplitInvitation associations
+SplitInvitation.belongsTo(Transaction, { foreignKey: 'transactionId' });
+Transaction.hasMany(SplitInvitation, { foreignKey: 'transactionId' });
+SplitInvitation.belongsTo(User, { as: 'inviter', foreignKey: 'invitedBy' });
+SplitInvitation.belongsTo(User, { as: 'resolvedUser', foreignKey: 'resolvedUserId' });
+
+// FriendContact associations
+FriendContact.belongsTo(User, { as: 'owner', foreignKey: 'userId' });
+FriendContact.belongsTo(User, { as: 'contact', foreignKey: 'contactUserId' });
+User.hasMany(FriendContact, { foreignKey: 'userId' });
+
+// RecurrentSplitConfig associations
+RecurrentSplitConfig.belongsTo(RecurrentPayment, { foreignKey: 'recurrentPaymentId' });
+RecurrentPayment.hasOne(RecurrentSplitConfig, { foreignKey: 'recurrentPaymentId' });
+
+// TransactionSplit -> SplitInvitation link
+TransactionSplit.belongsTo(SplitInvitation, { foreignKey: 'invitationId' });
+SplitInvitation.hasOne(TransactionSplit, { foreignKey: 'invitationId' });
+
 module.exports = {
   sequelize,
   User,
@@ -145,4 +167,7 @@ module.exports = {
   BankIntegration,
   IntegrationMap,
   ProcessedEmail,
+  SplitInvitation,
+  FriendContact,
+  RecurrentSplitConfig,
 };

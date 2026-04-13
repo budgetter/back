@@ -3,6 +3,7 @@ const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const BudgetService = require("../functions/budgetService");
+const splitResolutionService = require("../services/splitResolutionService");
 require("dotenv").config();
 
 // Register a new user
@@ -27,6 +28,13 @@ const register = async (req, res) => {
 
     // Create a default personal budget for the new user.
     await BudgetService.createDefaultBudget(newUser.id);
+
+    // Resolve any pending split invitations for this email (non-blocking for registration)
+    try {
+      await splitResolutionService.resolveInvitations(email, newUser.id);
+    } catch (invitationError) {
+      console.error("Failed to resolve split invitations during registration:", invitationError);
+    }
 
     return res
       .status(201)
@@ -53,6 +61,13 @@ const login = async (req, res) => {
     if (!isMatch) {
       return res.status(400).json({ message: "Invalid credentials" });
     }
+    // Resolve any pending split invitations for this email (non-blocking for login)
+    try {
+      await splitResolutionService.resolveInvitations(email, user.id);
+    } catch (invitationError) {
+      console.error("Failed to resolve split invitations during login:", invitationError);
+    }
+
     // Sign a JWT token with a 1-hour expiration
     const token = jwt.sign(
       { id: user.id, email: user.email },

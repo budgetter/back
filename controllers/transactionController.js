@@ -1,4 +1,4 @@
-const { Transaction, RecurrentPayment, TransactionSplit } = require('../models');
+const { Transaction, RecurrentPayment, TransactionSplit, User, SplitInvitation, RecurrentSplitConfig } = require('../models');
 const recurrentService = require('../functions/recurrentService');
 const { v4: uuidv4 } = require('uuid');
 
@@ -16,12 +16,15 @@ async function createTransaction(req, res) {
     recurrentPaymentId,
     walletId,
     frequency,
-    splits // Array of { userId, amount }
+    splits, // Array of { userId?, email?, amount?, splitMode? }
+    splitMode: requestSplitMode
   } = req.body;
 
   if (!amount || !type || !categoryId) {
     return res.status(400).json({ message: 'Missing required fields: amount, type, or categoryId' });
   }
+
+  const splitMode = requestSplitMode || 'even';
 
   try {
     const transactionDate = date || new Date().toISOString().split('T')[0];
@@ -41,21 +44,111 @@ async function createTransaction(req, res) {
 
     // Handle Splits
     if (splits && Array.isArray(splits) && splits.length > 0) {
-      const splitRecords = splits.map(split => ({
-        id: uuidv4(),
-        transactionId: transaction.id,
-        userId: split.userId,
-        amount: split.amount,
-        isPaid: false
-      }));
-      await TransactionSplit.bulkCreate(splitRecords);
+      // Validate at least one participant
+      if (splits.length === 0) {
+        return res.status(400).json({ message: 'At least one split participant required' });
+      }
+
+      // Resolve participants and check for self-split
+      const resolvedParticipants = [];
+      for (const split of splits) {
+        let participantUserId = split.userId || null;
+        let participantEmail = split.email || null;
+
+        // If email provided, try to resolve to a userId
+        if (!participantUserId && participantEmail) {
+          const existingUser = await User.findOne({ where: { email: participantEmail } });
+          if (existingUser) {
+            participantUserId = existingUser.id;
+          }
+        }
+
+        // Self-split prevention
+        if (participantUserId && participantUserId === req.user.id) {
+          return res.status(400).json({ message: 'Cannot split with yourself' });
+        }
+
+        resolvedParticipants.push({
+          userId: participantUserId,
+          email: participantEmail,
+          amount: split.amount || null,
+        });
+      }
+
+      // Calculate amounts based on split mode
+      if (splitMode === 'even') {
+        const N = resolvedParticipants.length + 1; // participants + owner
+        const perPerson = Math.floor((amount * 100) / N) / 100;
+
+        for (let i = 0; i < resolvedParticipants.length; i++) {
+          if (i === resolvedParticipants.length - 1) {
+            // Last participant absorbs rounding remainder
+            resolvedParticipants[i].amount = Math.round((amount - perPerson * (N - 1)) * 100) / 100;
+          } else {
+            resolvedParticipants[i].amount = perPerson;
+          }
+        }
+      } else if (splitMode === 'custom') {
+        // Validate all amounts are positive
+        for (const p of resolvedParticipants) {
+          if (!p.amount || p.amount <= 0) {
+            return res.status(400).json({ message: 'All split amounts must be positive' });
+          }
+        }
+
+        // Validate sum of all split amounts (including owner portion) equals total
+        // Owner portion = total - sum of participant amounts
+        const participantSum = resolvedParticipants.reduce((sum, p) => sum + parseFloat(p.amount), 0);
+        const ownerPortion = amount - participantSum;
+
+        if (ownerPortion <= 0 || Math.abs(participantSum + ownerPortion - amount) > 0.01) {
+          return res.status(400).json({ message: 'Split amounts must equal transaction total' });
+        }
+      }
+
+      // Create TransactionSplit or SplitInvitation for each participant
+      for (const participant of resolvedParticipants) {
+        if (participant.userId) {
+          // Registered user — create TransactionSplit directly
+          await TransactionSplit.create({
+            id: uuidv4(),
+            transactionId: transaction.id,
+            userId: participant.userId,
+            amount: participant.amount,
+            isPaid: false,
+            splitMode,
+          });
+        } else if (participant.email) {
+          // Unregistered user — create SplitInvitation
+          const invitation = await SplitInvitation.create({
+            id: uuidv4(),
+            transactionId: transaction.id,
+            email: participant.email,
+            amount: participant.amount,
+            splitMode,
+            status: 'pending',
+            invitedBy: req.user.id,
+          });
+
+          // Also create a TransactionSplit linked to the invitation (userId null)
+          await TransactionSplit.create({
+            id: uuidv4(),
+            transactionId: transaction.id,
+            userId: null,
+            amount: participant.amount,
+            isPaid: false,
+            splitMode,
+            invitationId: invitation.id,
+          });
+        }
+      }
     }
 
     // If frequency is provided and not "none"/"never", create a RecurrentPayment
     if (frequency && frequency !== 'none' && frequency !== 'never') {
       const nextPaymentDate = recurrentService.calculateNextDate(transactionDate, frequency);
 
-      await RecurrentPayment.create({
+      const recurrentPayment = await RecurrentPayment.create({
         id: uuidv4(),
         amount,
         description,
@@ -68,6 +161,20 @@ async function createTransaction(req, res) {
         groupId: GroupId || null,
         walletId: walletId || null,
       });
+
+      // If splits were provided, store the split config for future recurrent occurrences
+      if (splits && Array.isArray(splits) && splits.length > 0) {
+        await RecurrentSplitConfig.create({
+          id: uuidv4(),
+          recurrentPaymentId: recurrentPayment.id,
+          splitMode,
+          participants: splits.map(s => ({
+            userId: s.userId || null,
+            email: s.email || null,
+            amount: s.amount || null,
+          })),
+        });
+      }
     }
 
     return res.status(201).json({ message: 'Transaction created successfully', transaction });
@@ -76,6 +183,7 @@ async function createTransaction(req, res) {
     return res.status(500).json({ message: 'Server error while creating transaction' });
   }
 }
+
 
 
 /**
@@ -112,12 +220,107 @@ async function getTransactions(req, res) {
  */
 async function updateTransaction(req, res) {
   const { transactionId } = req.params;
-  const updateData = req.body;
+  const { splits, splitMode: requestSplitMode, TransactionSplits, ...updateData } = req.body;
+  const splitMode = requestSplitMode || 'even';
+
   try {
     const transaction = await Transaction.findByPk(transactionId);
     if (!transaction) return res.status(404).json({ message: 'Transaction not found' });
-    Object.assign(transaction, updateData);
+
+    // Update transaction fields (exclude split-related keys)
+    const safeFields = ['amount', 'description', 'date', 'type', 'categoryId', 'walletId', 'frequency'];
+    for (const field of safeFields) {
+      if (updateData[field] !== undefined) {
+        transaction[field] = updateData[field];
+      }
+    }
     await transaction.save();
+
+    // Handle splits update if splits array is provided
+    if (splits !== undefined) {
+      // Remove existing unpaid splits and pending invitations for this transaction
+      await TransactionSplit.destroy({ where: { transactionId, isPaid: false } });
+      await SplitInvitation.destroy({ where: { transactionId, status: 'pending' } });
+
+      if (Array.isArray(splits) && splits.length > 0) {
+        const amount = parseFloat(transaction.amount);
+
+        // Resolve participants
+        const resolvedParticipants = [];
+        for (const split of splits) {
+          let participantUserId = split.userId || null;
+          let participantEmail = split.email || null;
+
+          if (!participantUserId && participantEmail) {
+            const existingUser = await User.findOne({ where: { email: participantEmail } });
+            if (existingUser) {
+              participantUserId = existingUser.id;
+            }
+          }
+
+          if (participantUserId && participantUserId === req.user.id) {
+            return res.status(400).json({ message: 'Cannot split with yourself' });
+          }
+
+          resolvedParticipants.push({
+            userId: participantUserId,
+            email: participantEmail,
+            amount: split.amount || null,
+          });
+        }
+
+        // Calculate amounts for even mode
+        if (splitMode === 'even') {
+          const N = resolvedParticipants.length + 1;
+          const perPerson = Math.floor((amount * 100) / N) / 100;
+          for (let i = 0; i < resolvedParticipants.length; i++) {
+            resolvedParticipants[i].amount = i === resolvedParticipants.length - 1
+              ? Math.round((amount - perPerson * (N - 1)) * 100) / 100
+              : perPerson;
+          }
+        } else if (splitMode === 'custom') {
+          for (const p of resolvedParticipants) {
+            if (!p.amount || p.amount <= 0) {
+              return res.status(400).json({ message: 'All split amounts must be positive' });
+            }
+          }
+        }
+
+        // Create new splits
+        for (const participant of resolvedParticipants) {
+          if (participant.userId) {
+            await TransactionSplit.create({
+              id: uuidv4(),
+              transactionId,
+              userId: participant.userId,
+              amount: participant.amount,
+              isPaid: false,
+              splitMode,
+            });
+          } else if (participant.email) {
+            const invitation = await SplitInvitation.create({
+              id: uuidv4(),
+              transactionId,
+              email: participant.email,
+              amount: participant.amount,
+              splitMode,
+              status: 'pending',
+              invitedBy: req.user.id,
+            });
+            await TransactionSplit.create({
+              id: uuidv4(),
+              transactionId,
+              userId: null,
+              amount: participant.amount,
+              isPaid: false,
+              splitMode,
+              invitationId: invitation.id,
+            });
+          }
+        }
+      }
+    }
+
     return res.json({ message: 'Transaction updated successfully', transaction });
   } catch (error) {
     console.error('Error updating transaction:', error);
@@ -141,32 +344,10 @@ async function deleteTransaction(req, res) {
   }
 }
 
-async function settleSplit(req, res) {
-  const { splitId } = req.params;
-  const { proofOfPayment } = req.body; // URL or string path
-  try {
-    const split = await TransactionSplit.findByPk(splitId);
-    if (!split) return res.status(404).json({ message: "Split record not found" });
-
-    // Only the debtor or the transaction owner (creditor) should be able to update this? 
-    // For now, allowing update if authenticated. Ideally check req.user.id
-
-    split.isPaid = true;
-    split.paidAt = new Date();
-    if (proofOfPayment) split.proofOfPayment = proofOfPayment;
-
-    await split.save();
-    res.json({ message: "Split settled successfully", split });
-  } catch (error) {
-    console.error("Error settling split:", error);
-    res.status(500).json({ message: "Server error settling split" });
-  }
-}
 
 module.exports = {
   createTransaction,
   getTransactions,
   updateTransaction,
   deleteTransaction,
-  settleSplit
 };

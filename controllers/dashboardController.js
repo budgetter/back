@@ -1,4 +1,4 @@
-const { Transaction, Wallet, Category, RecurrentPayment } = require("../models");
+const { Transaction, Wallet, Category, RecurrentPayment, TransactionSplit, User, SplitInvitation } = require("../models");
 const { Op } = require("sequelize");
 const sequelize = require("../config/database");
 
@@ -166,7 +166,11 @@ async function getTransactionsList(req, res) {
             },
             include: [
                 { model: Category, attributes: ['name', 'icon', 'type'] },
-                { model: Wallet, attributes: ['name', 'icon'] }
+                { model: Wallet, attributes: ['name', 'icon'] },
+                { model: TransactionSplit, include: [
+                    { model: User, as: 'debtor', attributes: ['id', 'name', 'email'], required: false },
+                    { model: SplitInvitation, attributes: ['id', 'email', 'status'], required: false }
+                ] }
             ],
             order: [['date', 'DESC'], ['createdAt', 'DESC']],
             limit: 50
@@ -191,7 +195,16 @@ async function getTransactionsList(req, res) {
                 categoryName: t.Category?.name,
                 categoryIcon: t.Category?.icon,
                 walletName: t.Wallet?.name,
-                walletIcon: t.Wallet?.icon
+                walletIcon: t.Wallet?.icon,
+                TransactionSplits: (t.TransactionSplits || []).map(s => ({
+                    id: s.id,
+                    userId: s.userId,
+                    amount: s.amount,
+                    splitMode: s.splitMode,
+                    isPaid: s.isPaid,
+                    email: s.SplitInvitation?.email || (s.debtor?.email) || null,
+                    debtor: s.debtor ? { id: s.debtor.id, name: s.debtor.name, email: s.debtor.email } : null,
+                })),
             });
 
             const amt = parseFloat(t.amount || 0);
