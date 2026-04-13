@@ -216,8 +216,8 @@ async function getDebtsSummary(req, res) {
   try {
     const currentUserId = req.user.id;
 
-    // 1. Amounts owed TO current user (current user owns the transaction, others owe)
-    const owedToMe = await sequelize.query(`
+    // 1a. Amounts owed TO current user by registered users
+    const owedToMeRegistered = await sequelize.query(`
       SELECT ts.userId, u.id, u.name, u.email, SUM(ts.amount) AS totalAmount
       FROM transaction_splits ts
       INNER JOIN transactions t ON ts.transactionId = t.id
@@ -227,6 +227,16 @@ async function getDebtsSummary(req, res) {
         AND ts.userId IS NOT NULL
         AND ts.userId != :currentUserId
       GROUP BY ts.userId, u.id, u.name, u.email
+    `, { replacements: { currentUserId }, type: sequelize.QueryTypes.SELECT });
+
+    // 1b. Amounts owed TO current user by unresolved invitations (email-only)
+    const owedToMeInvitations = await sequelize.query(`
+      SELECT si.email, SUM(si.amount) AS totalAmount
+      FROM split_invitations si
+      INNER JOIN transactions t ON si.transactionId = t.id
+      WHERE si.invitedBy = :currentUserId
+        AND si.status = 'pending'
+      GROUP BY si.email
     `, { replacements: { currentUserId }, type: sequelize.QueryTypes.SELECT });
 
     // 2. Amounts owed BY current user (current user is the debtor)
@@ -241,12 +251,23 @@ async function getDebtsSummary(req, res) {
       GROUP BY t.UserId, u.id, u.name, u.email
     `, { replacements: { currentUserId }, type: sequelize.QueryTypes.SELECT });
 
-    const owedToMeFormatted = (owedToMe || []).map((row) => ({
-      userId: row.userId,
-      name: row.name,
-      email: row.email,
-      totalAmount: parseFloat(row.totalAmount),
-    }));
+    // Combine registered + invitation-based debts owed to me
+    const owedToMeFormatted = [
+      ...(owedToMeRegistered || []).map((row) => ({
+        userId: row.userId,
+        name: row.name,
+        email: row.email,
+        totalAmount: parseFloat(row.totalAmount),
+        type: 'registered',
+      })),
+      ...(owedToMeInvitations || []).map((row) => ({
+        userId: null,
+        name: null,
+        email: row.email,
+        totalAmount: parseFloat(row.totalAmount),
+        type: 'invitation',
+      })),
+    ];
 
     const owedByMeFormatted = (owedByMe || []).map((row) => ({
       userId: row.creditorUserId,

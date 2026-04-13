@@ -5,6 +5,8 @@ const {
   Transaction,
   Category,
   UserGroup,
+  User,
+  TransactionSplit,
 } = require("../models");
 const sequelize = require("../config/database");
 const { Op } = require("sequelize");
@@ -345,11 +347,18 @@ async function getRemainingBudget(req, res) {
       // Actually usually personal ones don't have GroupId. 
     }
 
-    // Get all transactions for the month with category details
+    // Get all transactions for the month with category details and splits
     const transactions = await Transaction.findAll({
       where: transactionWhere,
-      include: [{ model: Category, attributes: ["id", "name", "icon", "type"] }],
+      include: [
+        { model: Category, attributes: ["id", "name", "icon", "type"] },
+        { model: TransactionSplit, attributes: ["amount"] },
+      ],
     });
+
+    // Check user's budget split mode preference
+    const userRecord = await User.findByPk(userId, { attributes: ["budgetSplitMode"] });
+    const splitMode = userRecord?.budgetSplitMode || 'total';
 
     // Create a map of category totals by type (expense vs income)
     const categoryTotals = {};
@@ -358,9 +367,15 @@ async function getRemainingBudget(req, res) {
 
     transactions.forEach((trans) => {
       const catId = trans.categoryId;
-      const amount = parseFloat(trans.amount || 0);
+      let amount = parseFloat(trans.amount || 0);
       const category = trans.Category;
       const type = category ? category.type : trans.type;
+
+      // If split_only mode, subtract split portions to get owner's share
+      if (splitMode === 'split_only' && trans.TransactionSplits && trans.TransactionSplits.length > 0) {
+        const splitTotal = trans.TransactionSplits.reduce((sum, s) => sum + parseFloat(s.amount || 0), 0);
+        amount = Math.max(0, amount - splitTotal);
+      }
 
       if (!categoryTotals[catId]) {
         categoryTotals[catId] = {
