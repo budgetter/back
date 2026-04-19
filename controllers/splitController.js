@@ -155,19 +155,41 @@ async function searchContacts(req, res) {
   const { q } = req.query;
 
   try {
-    // No query — return recent contacts (people user has split with before)
+    // No query — return top 3 most contacted people
     if (!q || q.trim().length === 0) {
-      const contacts = await FriendContact.findAll({
-        where: { userId: req.user.id },
-        include: [{
-          model: User, as: "contact",
-          attributes: ["id", "name", "email"],
-          required: false,
-        }],
-        order: [["updatedAt", "DESC"]],
-        limit: 10,
-      });
-      return res.json({ contacts, matchedUser: null });
+      // Get contacts sorted by how many times they appear in splits/invitations
+      const topContacts = await sequelize.query(`
+        SELECT fc.*, 
+          COALESCE(split_count, 0) + COALESCE(invite_count, 0) AS interactionCount
+        FROM friend_contacts fc
+        LEFT JOIN (
+          SELECT ts.userId AS targetId, COUNT(*) AS split_count
+          FROM transaction_splits ts
+          INNER JOIN transactions t ON ts.transactionId = t.id
+          WHERE t.UserId = :userId AND ts.userId IS NOT NULL
+          GROUP BY ts.userId
+        ) sc ON fc.contactUserId = sc.targetId
+        LEFT JOIN (
+          SELECT si.email, COUNT(*) AS invite_count
+          FROM split_invitations si
+          WHERE si.invitedBy = :userId
+          GROUP BY si.email
+        ) ic ON LOWER(fc.contactEmail) = LOWER(ic.email)
+        WHERE fc.userId = :userId
+        ORDER BY interactionCount DESC, fc.updatedAt DESC
+        LIMIT 3
+      `, { replacements: { userId: req.user.id }, type: sequelize.QueryTypes.SELECT });
+
+      // Enrich with user data
+      const enriched = await Promise.all(topContacts.map(async (c) => {
+        let contact = null;
+        if (c.contactUserId) {
+          contact = await User.findByPk(c.contactUserId, { attributes: ["id", "name", "email"] });
+        }
+        return { ...c, contact: contact ? contact.get({ plain: true }) : null };
+      }));
+
+      return res.json({ contacts: enriched, matchedUser: null, similarContacts: [] });
     }
 
     const searchTerm = `%${q.trim().toLowerCase()}%`;

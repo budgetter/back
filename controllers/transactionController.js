@@ -96,13 +96,12 @@ async function createTransaction(req, res) {
           }
         }
 
-        // Validate sum of all split amounts (including owner portion) equals total
-        // Owner portion = total - sum of participant amounts
-        const participantSum = resolvedParticipants.reduce((sum, p) => sum + parseFloat(p.amount), 0);
+        // Validate participant amounts don't exceed the total
+        const participantSum = resolvedParticipants.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
         const ownerPortion = amount - participantSum;
 
-        if (ownerPortion <= 0 || Math.abs(participantSum + ownerPortion - amount) > 0.01) {
-          return res.status(400).json({ message: 'Split amounts must equal transaction total' });
+        if (ownerPortion < 0) {
+          return res.status(400).json({ message: 'Split amounts exceed the transaction total' });
         }
       }
 
