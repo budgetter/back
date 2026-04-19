@@ -68,11 +68,11 @@ const login = async (req, res) => {
       console.error("Failed to resolve split invitations during login:", invitationError);
     }
 
-    // Sign a JWT token with a 1-hour expiration
+    // Sign a JWT token with a 30-day expiration
     const token = jwt.sign(
       { id: user.id, email: user.email },
       process.env.JWT_SECRET,
-      { expiresIn: "1h" }
+      { expiresIn: "30d" }
     );
     return res.json({ token });
   } catch (error) {
@@ -81,4 +81,20 @@ const login = async (req, res) => {
   }
 };
 
-module.exports = { register, login };
+// Refresh token — issues a new token if the current one is still valid
+const refreshToken = async (req, res) => {
+  try {
+    // req.user is set by authenticateToken middleware
+    const token = jwt.sign(
+      { id: req.user.id, email: req.user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: "30d" }
+    );
+    return res.json({ token });
+  } catch (error) {
+    console.error("Token refresh error:", error);
+    return res.status(500).json({ message: "Server error refreshing token" });
+  }
+};
+
+module.exports = { register, login, refreshToken };

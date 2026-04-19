@@ -1,12 +1,15 @@
 const express = require("express");
 const router = express.Router();
-const { register, login } = require("../controllers/authController");
+const { register, login, refreshToken } = require("../controllers/authController");
+const { authenticateToken } = require("../middlewares/authMiddleware");
 const passport = require("passport");
 const jwt = require("jsonwebtoken");
 
 router.post("/register", register);
 
 router.post("/login", login);
+
+router.post("/refresh", authenticateToken, refreshToken);
 
 router.get(
   "/google",
@@ -24,7 +27,7 @@ router.get(
     const token = jwt.sign(
       { id: req.user.id, email: req.user.email },
       process.env.JWT_SECRET,
-      { expiresIn: "48h" }
+      { expiresIn: "30d" }
     );
     // Redirect back to the front end with the token as a query parameter.
     res.redirect(`${process.env.ORIGIN_URL}/login?token=${token}`);
