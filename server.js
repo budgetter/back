@@ -76,26 +76,23 @@ const initializeDatabase = async () => {
     await sequelize.authenticate();
     console.log("Database connection has been established successfully.");
 
-    // Run migrations on every startup (they are idempotent — safe to re-run)
-    const { exec } = require("child_process");
-    await new Promise((resolve, reject) => {
-      exec("npx sequelize-cli db:migrate", (error, stdout, stderr) => {
-        if (error) {
-          console.error(`Migration error: ${error.message}`);
-          // Don't reject — allow app to start even if migration fails
-          resolve();
-          return;
-        }
-        if (stderr) {
-          console.error(`Migration stderr: ${stderr}`);
-        }
-        console.log(`Migration stdout: ${stdout}`);
-        resolve();
-      });
-    });
-
-    // Only run seeders in development
+    // Only run migrations and seeders in development (production runs migrations during build)
     if (process.env.NODE_ENV === "development") {
+      const { exec } = require("child_process");
+      await new Promise((resolve, reject) => {
+        exec("npx sequelize-cli db:migrate", (error, stdout, stderr) => {
+          if (error) {
+            console.error(`Migration error: ${error.message}`);
+            reject(error);
+            return;
+          }
+          if (stderr) {
+            console.error(`Migration stderr: ${stderr}`);
+          }
+          console.log(`Migration stdout: ${stdout}`);
+          resolve();
+        });
+      });
       const { Sequelize } = require('sequelize');
       await defaultCategoriesSeeder.up(sequelize.getQueryInterface(), Sequelize);
       console.log("Default categories seeded successfully.");
