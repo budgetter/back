@@ -1,4 +1,4 @@
-const { Transaction, RecurrentPayment, TransactionSplit, User, SplitInvitation, RecurrentSplitConfig } = require('../models');
+const { Transaction, RecurrentPayment, TransactionSplit, User, SplitInvitation, RecurrentSplitConfig, FriendContact } = require('../models');
 const recurrentService = require('../functions/recurrentService');
 const { v4: uuidv4 } = require('uuid');
 
@@ -89,10 +89,10 @@ async function createTransaction(req, res) {
           }
         }
       } else if (splitMode === 'custom') {
-        // Validate all amounts are positive
+        // Validate amounts are not negative (0 is allowed for favors)
         for (const p of resolvedParticipants) {
-          if (!p.amount || p.amount <= 0) {
-            return res.status(400).json({ message: 'All split amounts must be positive' });
+          if (p.amount !== null && p.amount !== undefined && p.amount < 0) {
+            return res.status(400).json({ message: 'Split amounts cannot be negative' });
           }
         }
 
@@ -140,6 +140,24 @@ async function createTransaction(req, res) {
             splitMode,
             invitationId: invitation.id,
           });
+        }
+      }
+      // Auto-save participants as contacts for future quick access
+      for (const participant of resolvedParticipants) {
+        const contactEmail = participant.email;
+        if (contactEmail) {
+          const existing = await FriendContact.findOne({
+            where: { userId: req.user.id, contactEmail },
+          });
+          if (!existing) {
+            await FriendContact.create({
+              id: uuidv4(),
+              userId: req.user.id,
+              contactUserId: participant.userId || null,
+              contactEmail,
+              contactName: null,
+            });
+          }
         }
       }
     }
@@ -280,8 +298,8 @@ async function updateTransaction(req, res) {
           }
         } else if (splitMode === 'custom') {
           for (const p of resolvedParticipants) {
-            if (!p.amount || p.amount <= 0) {
-              return res.status(400).json({ message: 'All split amounts must be positive' });
+            if (p.amount !== null && p.amount !== undefined && p.amount < 0) {
+              return res.status(400).json({ message: 'Split amounts cannot be negative' });
             }
           }
         }
@@ -316,6 +334,24 @@ async function updateTransaction(req, res) {
               splitMode,
               invitationId: invitation.id,
             });
+          }
+        }
+
+        // Auto-save participants as contacts
+        for (const participant of resolvedParticipants) {
+          if (participant.email) {
+            const existing = await FriendContact.findOne({
+              where: { userId: req.user.id, contactEmail: participant.email },
+            });
+            if (!existing) {
+              await FriendContact.create({
+                id: uuidv4(),
+                userId: req.user.id,
+                contactUserId: participant.userId || null,
+                contactEmail: participant.email,
+                contactName: null,
+              });
+            }
           }
         }
       }

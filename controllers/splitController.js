@@ -154,14 +154,26 @@ async function updateContact(req, res) {
 async function searchContacts(req, res) {
   const { q } = req.query;
 
-  if (!q || q.trim().length === 0) {
-    return res.json({ contacts: [], users: [] });
-  }
-
-  const searchTerm = `%${q.trim().toLowerCase()}%`;
-
   try {
-    // 1. Search FriendContact entries for the current user (case-insensitive)
+    // No query — return recent contacts (people user has split with before)
+    if (!q || q.trim().length === 0) {
+      const contacts = await FriendContact.findAll({
+        where: { userId: req.user.id },
+        include: [{
+          model: User, as: "contact",
+          attributes: ["id", "name", "email"],
+          required: false,
+        }],
+        order: [["updatedAt", "DESC"]],
+        limit: 10,
+      });
+      return res.json({ contacts, matchedUser: null });
+    }
+
+    const searchTerm = `%${q.trim().toLowerCase()}%`;
+    const exactEmail = q.trim().toLowerCase();
+
+    // 1. Search existing contacts (people user has interacted with before)
     const contacts = await FriendContact.findAll({
       where: {
         userId: req.user.id,
@@ -170,37 +182,52 @@ async function searchContacts(req, res) {
           sequelize.where(fn('LOWER', col('FriendContact.contactName')), { [Op.like]: searchTerm }),
         ],
       },
-      include: [
-        {
-          model: User,
-          as: "contact",
-          attributes: ["id", "name", "email"],
-          required: false,
-        },
-      ],
+      include: [{
+        model: User, as: "contact",
+        attributes: ["id", "name", "email"],
+        required: false,
+      }],
     });
 
-    // Collect emails already in contacts to deduplicate
     const contactEmails = new Set(contacts.map((c) => c.contactEmail.toLowerCase()));
 
-    // 2. Search User table by name or email, excluding the current user (case-insensitive)
-    const users = await User.findAll({
-      where: {
-        id: { [Op.ne]: req.user.id },
-        [Op.or]: [
-          sequelize.where(fn('LOWER', col('User.name')), { [Op.like]: searchTerm }),
-          sequelize.where(fn('LOWER', col('User.email')), { [Op.like]: searchTerm }),
-        ],
-      },
-      attributes: ["id", "name", "email"],
-    });
+    // 2. Only resolve a registered user if the query looks like a complete email
+    let matchedUser = null;
+    if (exactEmail.includes('@') && exactEmail.includes('.')) {
+      const user = await User.findOne({
+        where: { email: exactEmail, id: { [Op.ne]: req.user.id } },
+        attributes: ["id", "name", "email"],
+      });
+      if (user && !contactEmails.has(user.email.toLowerCase())) {
+        matchedUser = user;
+      }
+    }
 
-    // Deduplicate: exclude users already in contacts
-    const filteredUsers = users.filter(
-      (u) => !contactEmails.has(u.email.toLowerCase())
-    );
+    // 3. Check for similar emails in contacts to help detect typos
+    let similarContacts = [];
+    if (exactEmail.includes('@')) {
+      const emailLocal = exactEmail.split('@')[0];
+      if (emailLocal.length >= 3) {
+        const similarTerm = `%${emailLocal}%`;
+        similarContacts = await FriendContact.findAll({
+          where: {
+            userId: req.user.id,
+            contactEmail: { [Op.ne]: exactEmail },
+            [Op.and]: [
+              sequelize.where(fn('LOWER', col('FriendContact.contactEmail')), { [Op.like]: similarTerm }),
+            ],
+          },
+          attributes: ["id", "contactEmail", "contactName"],
+          limit: 3,
+        });
+        // Filter out contacts already in the main results
+        similarContacts = similarContacts.filter(
+          (sc) => !contactEmails.has(sc.contactEmail.toLowerCase())
+        );
+      }
+    }
 
-    return res.json({ contacts, users: filteredUsers });
+    return res.json({ contacts, matchedUser, similarContacts });
   } catch (error) {
     console.error("Error searching contacts:", error);
     return res.status(500).json({ message: "Server error while searching contacts" });
