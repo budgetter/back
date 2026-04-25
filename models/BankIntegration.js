@@ -47,6 +47,11 @@ const BankIntegration = sequelize.define('BankIntegration', {
     addLabel: {
         type: DataTypes.BOOLEAN,
         defaultValue: true,
+    },
+    nextScheduledSync: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        defaultValue: null,
     }
 }, {
     tableName: 'BankIntegrations',

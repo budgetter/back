@@ -21,6 +21,12 @@ router.post('/sync', authenticateToken, syncRateLimiter, integrationController.s
 // Preferences
 router.put('/preferences', authenticateToken, integrationController.updatePreferences);
 
+// Disconnect
+router.delete('/disconnect/:id', authenticateToken, integrationController.disconnectIntegration);
+
+// Debug (DEV only — controller enforces production guard)
+router.get('/debug/processed-emails', authenticateToken, integrationController.debugProcessedEmails);
+
 // Error sanitizer — must be last middleware on the router
 router.use(errorSanitizer);
 

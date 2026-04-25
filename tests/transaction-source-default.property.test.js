@@ -50,10 +50,11 @@ const defaultValue = extractSourceDefaultValue(modelSource);
 const allowNull = extractSourceAllowNull(modelSource);
 
 // Arbitrary generators for valid transaction payload fields (without source)
-const amountArb = fc.float({ min: 0.01, max: 999999.99, noNaN: true })
+const amountArb = fc.float({ min: Math.fround(0.01), max: Math.fround(999999.99), noNaN: true })
   .map((v) => parseFloat(v.toFixed(2)));
 const descriptionArb = fc.oneof(fc.string({ minLength: 0, maxLength: 200 }), fc.constant(null));
 const dateArb = fc.date({ min: new Date('2000-01-01'), max: new Date('2099-12-31') })
+  .filter((d) => !isNaN(d.getTime()))
   .map((d) => d.toISOString().split('T')[0]);
 const typeArb = fc.constantFrom('expense', 'income');
 

@@ -6,6 +6,7 @@ const GmailService = require("../services/gmailService");
 const BankParsers = require("../parsers/BankParsers");
 const { v4: uuidv4 } = require('uuid');
 const { encrypt, decrypt } = require("../utils/encryption");
+const { performSync } = require("../services/performSync");
 
 async function connectGmail(req, res, next) {
     try {
@@ -20,8 +21,26 @@ async function connectGmail(req, res, next) {
             expiresAt,
         });
 
+        // Determine Gmail scope based on user preferences or query param
+        let gmailScope = 'https://www.googleapis.com/auth/gmail.modify';
+
+        if (req.query.scope === 'readonly') {
+            gmailScope = 'https://www.googleapis.com/auth/gmail.readonly';
+        } else if (req.query.scope === 'modify') {
+            gmailScope = 'https://www.googleapis.com/auth/gmail.modify';
+        } else {
+            // Check stored preferences: if both markAsRead and addLabel are false, use readonly
+            const existingIntegration = await BankIntegration.findOne({
+                where: { userId: req.user.id, provider: 'Gmail', isActive: true }
+            });
+
+            if (existingIntegration && !existingIntegration.markAsRead && !existingIntegration.addLabel) {
+                gmailScope = 'https://www.googleapis.com/auth/gmail.readonly';
+            }
+        }
+
         passport.authenticate("google", {
-            scope: ["profile", "email", "https://www.googleapis.com/auth/gmail.modify"],
+            scope: ["profile", "email", gmailScope],
             accessType: "offline",
             prompt: "consent",
             state: JSON.stringify({ userId: req.user.id, nonce })
@@ -86,22 +105,23 @@ async function gmailCallback(req, res) {
         // Encrypt refresh token
         const encryptedToken = tokens.refresh_token ? encrypt(tokens.refresh_token) : null;
 
-        // Save/Update Integration
-        const [integration, created] = await BankIntegration.findOrCreate({
-            where: { userId, provider: 'Gmail' },
-            defaults: {
-                email: userInfo.data.email,
-                refreshToken: encryptedToken || '',
-                isActive: true
-            }
+        // Check for duplicate: active integration with same email for this user
+        const existingIntegration = await BankIntegration.findOne({
+            where: { userId, provider: 'Gmail', email: userInfo.data.email, isActive: true }
         });
 
-        if (!created) {
-            integration.email = userInfo.data.email;
-            if (encryptedToken) integration.refreshToken = encryptedToken;
-            integration.isActive = true;
-            await integration.save();
+        if (existingIntegration) {
+            return res.redirect(`${process.env.ORIGIN_URL}/settings/integrations?status=duplicate`);
         }
+
+        // Create new integration record (multi-account support)
+        await BankIntegration.create({
+            userId,
+            provider: 'Gmail',
+            email: userInfo.data.email,
+            refreshToken: encryptedToken || '',
+            isActive: true
+        });
 
         res.redirect(`${process.env.ORIGIN_URL}/settings/integrations?status=success`);
 
@@ -113,28 +133,46 @@ async function gmailCallback(req, res) {
 
 async function getSettings(req, res) {
     try {
-        const integration = await BankIntegration.findOne({
+        const integrations = await BankIntegration.findAll({
             where: { userId: req.user.id, provider: 'Gmail' },
             include: [{ model: IntegrationMap }]
         });
 
-        if (!integration) return res.json({ connected: false });
-
-        // Defense-in-depth: explicit ownership check
-        if (integration.userId !== req.user.id) {
-            return res.status(403).json({ message: "Forbidden" });
+        if (!integrations || integrations.length === 0) {
+            return res.json({ accounts: [], maps: [] });
         }
 
-        return res.json({
-            connected: true,
+        // Build accounts array
+        const accounts = integrations.map(integration => ({
+            id: integration.id,
             email: integration.email,
+            connected: true,
+            isActive: integration.isActive,
             lastSync: integration.lastSync,
-            maps: integration.IntegrationMaps, // { bankParameter, walletId, defaultCategoryId }
+            nextScheduledSync: integration.nextScheduledSync,
             syncDaysBack: integration.syncDaysBack,
             unreadOnly: integration.unreadOnly,
             markAsRead: integration.markAsRead,
             addLabel: integration.addLabel
-        });
+        }));
+
+        // Collect maps from all integrations, deduplicated by bankParameter
+        const seenBankParams = new Set();
+        const maps = [];
+        for (const integration of integrations) {
+            for (const map of integration.IntegrationMaps) {
+                if (!seenBankParams.has(map.bankParameter)) {
+                    seenBankParams.add(map.bankParameter);
+                    maps.push({
+                        bankParameter: map.bankParameter,
+                        walletId: map.walletId,
+                        defaultCategoryId: map.defaultCategoryId
+                    });
+                }
+            }
+        }
+
+        return res.json({ accounts, maps });
     } catch (error) {
         console.error("Get Settings Error:", error);
         res.status(500).json({ message: "Server error" });
@@ -182,7 +220,7 @@ async function updateSettings(req, res) {
 
 async function updatePreferences(req, res) {
     try {
-        const { syncDaysBack, unreadOnly, markAsRead, addLabel } = req.body;
+        const { syncDaysBack, unreadOnly, markAsRead, addLabel, integrationId } = req.body;
 
         // Validate syncDaysBack if provided
         if (syncDaysBack !== undefined) {
@@ -191,17 +229,36 @@ async function updatePreferences(req, res) {
             }
         }
 
-        const integration = await BankIntegration.findOne({
-            where: { userId: req.user.id, provider: 'Gmail' }
-        });
+        let integration;
 
-        if (!integration) {
-            return res.status(404).json({ message: "Integration not found" });
-        }
+        if (integrationId) {
+            // Target a specific account by ID
+            integration = await BankIntegration.findOne({
+                where: { id: integrationId, provider: 'Gmail' }
+            });
 
-        // Defense-in-depth: explicit ownership check
-        if (integration.userId !== req.user.id) {
-            return res.status(403).json({ message: "Forbidden" });
+            if (!integration) {
+                return res.status(404).json({ message: "Integration not found" });
+            }
+
+            // Verify ownership
+            if (integration.userId !== req.user.id) {
+                return res.status(403).json({ message: "Forbidden" });
+            }
+        } else {
+            // Backward compatibility: fall back to findOne for the user
+            integration = await BankIntegration.findOne({
+                where: { userId: req.user.id, provider: 'Gmail' }
+            });
+
+            if (!integration) {
+                return res.status(404).json({ message: "Integration not found" });
+            }
+
+            // Defense-in-depth: explicit ownership check
+            if (integration.userId !== req.user.id) {
+                return res.status(403).json({ message: "Forbidden" });
+            }
         }
 
         // Update only provided fields
@@ -221,253 +278,65 @@ async function updatePreferences(req, res) {
 
 
 async function syncNow(req, res) {
-    let processedCount = 0;
-    let createdCount = 0;
-    let skippedCount = 0;
-    let failedCount = 0;
-
     try {
-        const integration = await BankIntegration.findOne({
-            where: { userId: req.user.id, provider: 'Gmail' },
+        const integrations = await BankIntegration.findAll({
+            where: { userId: req.user.id, provider: 'Gmail', isActive: true },
             include: [{ model: IntegrationMap }]
         });
 
-        if (!integration || !integration.isActive || !integration.refreshToken) {
+        if (!integrations || integrations.length === 0) {
             return res.status(400).json({ message: "Integration not active" });
         }
 
-        // Defense-in-depth: explicit ownership check
-        if (integration.userId !== req.user.id) {
-            return res.status(403).json({ message: "Forbidden" });
-        }
+        // Aggregate results across all active integrations
+        let totalProcessed = 0;
+        let totalCreated = 0;
+        let totalSkipped = 0;
+        let totalFailed = 0;
+        let allDetails = [];
+        let requiresReauth = false;
 
-        // Decrypt Token
-        const refreshToken = decrypt(integration.refreshToken);
-        if (!refreshToken) {
-            return res.status(500).json({ message: "Failed to decrypt credentials" });
-        }
-
-        const gmailService = new GmailService(refreshToken);
-
-        // Define search queries based on supported banks
-        const baseQueries = [
-            'from:colpatriaInforma@scotiabankcolpatria.com',
-            'from:alertasynotificaciones@notificacionesbancolombia.com',
-            'from:alertasynotificaciones@bancolombia.com.co'
-        ];
-
-        // Compute date filter from syncDaysBack preference
-        const syncDays = integration.syncDaysBack || 30;
-        const sinceDate = new Date();
-        sinceDate.setDate(sinceDate.getDate() - syncDays);
-        const yyyy = sinceDate.getFullYear();
-        const mm = String(sinceDate.getMonth() + 1).padStart(2, '0');
-        const dd = String(sinceDate.getDate()).padStart(2, '0');
-        const dateFilter = `after:${yyyy}/${mm}/${dd}`;
-
-        // Build final queries with date filter and optional unread filter
-        const queries = baseQueries.map(q => {
-            let query = `${q} ${dateFilter}`;
-            if (integration.unreadOnly === true) {
-                query += ' is:unread';
-            }
-            return query;
-        });
-
-        // Collect all messages across queries, limit total to 50
-        const MAX_MESSAGES = 50;
-        let allMessages = [];
-
-        for (const q of queries) {
-            if (allMessages.length >= MAX_MESSAGES) break;
-
-            let messages;
+        for (const integration of integrations) {
             try {
-                const remaining = MAX_MESSAGES - allMessages.length;
-                messages = await gmailService.listMessages(`${q} -label:TRASH`, remaining);
-            } catch (listError) {
-                // Token error detection: mark inactive and return requiresReauth
-                if (gmailService.isTokenError(listError)) {
-                    integration.isActive = false;
-                    await integration.save();
-                    return res.json({ requiresReauth: true, message: "Token expired or revoked. Please re-authorize." });
+                const result = await performSync(integration, req.user.id);
+
+                totalProcessed += result.processed;
+                totalCreated += result.created;
+                totalSkipped += result.skipped;
+                totalFailed += result.failed;
+                allDetails = allDetails.concat(result.details);
+
+                if (result.requiresReauth) {
+                    requiresReauth = true;
                 }
-                throw listError;
-            }
 
-            allMessages = allMessages.concat(messages);
-        }
-
-        // Enforce max 50 total
-        allMessages = allMessages.slice(0, MAX_MESSAGES);
-
-        // Pre-fetch label ID if addLabel is enabled (once before the loop)
-        let budgetterLabelId = null;
-        if (integration.addLabel === true) {
-            try {
-                budgetterLabelId = await gmailService.getOrCreateLabel("Budgetter");
-            } catch (labelError) {
-                console.error("Failed to get/create Budgetter label, skipping labeling:", labelError.message);
-                // Skip all labeling but continue sync
+                // Update nextScheduledSync to 8 hours from now with some jitter
+                const jitter = Math.floor(Math.random() * 3600000); // 0-60 min
+                integration.nextScheduledSync = new Date(Date.now() + 8 * 60 * 60 * 1000 + jitter);
+                await integration.save();
+            } catch (syncError) {
+                const safeMessage = syncError.message ? syncError.message.replace(/refresh_token[^\s]*/gi, '[REDACTED]') : 'Unknown error';
+                console.error(`Sync error for integration ${integration.id}: ${safeMessage}`);
+                // Continue to next integration
             }
         }
 
-        // Process each message with per-message timeout and error isolation
-        for (const msgMeta of allMessages) {
-            const processMessage = async () => {
-                // Check if already processed — skip if exists
-                const isProcessed = await ProcessedEmail.findOne({
-                    where: { integrationId: integration.id, messageId: msgMeta.id }
-                });
-
-                if (isProcessed) {
-                    skippedCount++;
-                    return;
-                }
-
-                const msg = await gmailService.getMessage(msgMeta.id);
-                const body = gmailService.extractBody(msg.payload);
-                const internalDate = parseInt(msg.internalDate);
-
-                // Get header From
-                let fromHeader = '';
-                if (msg.payload.headers) {
-                    const h = msg.payload.headers.find(h => h.name === 'From');
-                    if (h) fromHeader = h.value;
-                }
-
-                // Parse
-                const parserFunc = BankParsers.getParser(fromHeader);
-                if (parserFunc) {
-                    const result = parserFunc(body, internalDate);
-
-                    if (result) {
-                        // Find Mapping for this bank
-                        let map = integration.IntegrationMaps.find(m => m.bankParameter === result.parserId);
-
-                        if (map && map.walletId) {
-                            let categoryId = map.defaultCategoryId;
-
-                            // Try to infer category from parser result
-                            if (result.rawCategory && result.rawCategory !== 'Unknown') {
-                                const cat = await Category.findOne({
-                                    where: { name: result.rawCategory }
-                                });
-                                if (cat) categoryId = cat.id;
-                            }
-
-                            if (categoryId) {
-                                // Atomic write: ProcessedEmail + Transaction in a single transaction
-                                await sequelize.transaction(async (t) => {
-                                    await ProcessedEmail.create({
-                                        id: uuidv4(),
-                                        integrationId: integration.id,
-                                        messageId: msgMeta.id
-                                    }, { transaction: t });
-
-                                    await Transaction.create({
-                                        id: uuidv4(),
-                                        amount: result.amount,
-                                        description: result.description,
-                                        date: result.date,
-                                        type: result.type,
-                                        categoryId: categoryId,
-                                        UserId: req.user.id,
-                                        walletId: map.walletId,
-                                        source: 'email_sync'
-                                    }, { transaction: t });
-                                });
-
-                                createdCount++;
-                                processedCount++;
-
-                                // Post-processing: mark as read
-                                if (integration.markAsRead === true) {
-                                    try {
-                                        await gmailService.markAsRead(msgMeta.id);
-                                    } catch (markError) {
-                                        console.error(`Failed to mark message ${msgMeta.id} as read:`, markError.message);
-                                    }
-                                }
-
-                                // Post-processing: add Budgetter label
-                                if (integration.addLabel === true && budgetterLabelId) {
-                                    try {
-                                        await gmailService.addLabel(msgMeta.id, budgetterLabelId);
-                                    } catch (labelError) {
-                                        console.error(`Failed to add label to message ${msgMeta.id}:`, labelError.message);
-                                    }
-                                }
-
-                                return;
-                            }
-                        }
-                    }
-                }
-
-                // No parser match, no mapping, or no category — still mark as processed
-                await ProcessedEmail.create({
-                    id: uuidv4(),
-                    integrationId: integration.id,
-                    messageId: msgMeta.id
-                });
-                processedCount++;
-            };
-
-            try {
-                // Per-message 10-second timeout
-                const timeoutPromise = new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error('Message processing timeout')), 10000)
-                );
-                await Promise.race([processMessage(), timeoutPromise]);
-            } catch (msgError) {
-                // Handle unique constraint violations gracefully — skip, don't crash
-                if (msgError.name === 'SequelizeUniqueConstraintError') {
-                    skippedCount++;
-                    continue;
-                }
-
-                // Log error with message ID but never expose refresh token values
-                const safeMessage = msgError.message ? msgError.message.replace(/refresh_token[^\s]*/gi, '[REDACTED]') : 'Unknown error';
-                console.error(`Error processing message ${msgMeta.id}: ${safeMessage}`);
-                failedCount++;
-                // Continue processing remaining messages
-            }
-        }
-
-        // Only update lastSync if at least one message was processed successfully
-        if (processedCount > 0) {
-            integration.lastSync = new Date();
-            await integration.save();
-        }
-
-        return res.json({
+        const response = {
             message: "Sync complete",
-            processed: processedCount,
-            created: createdCount,
-            skipped: skippedCount,
-            failed: failedCount
-        });
+            processed: totalProcessed,
+            created: totalCreated,
+            skipped: totalSkipped,
+            failed: totalFailed,
+            details: allDetails
+        };
+
+        if (requiresReauth) {
+            response.requiresReauth = true;
+        }
+
+        return res.json(response);
 
     } catch (error) {
-        // Outer catch: token error detection for any uncaught token errors
-        const isTokenErr = (error.code === 401) || (error.message && error.message.includes('invalid_grant'));
-        if (isTokenErr) {
-            try {
-                const integration = await BankIntegration.findOne({
-                    where: { userId: req.user.id, provider: 'Gmail' }
-                });
-                if (integration) {
-                    integration.isActive = false;
-                    await integration.save();
-                }
-            } catch (saveErr) {
-                console.error("Failed to deactivate integration:", saveErr.message);
-            }
-            return res.json({ requiresReauth: true, message: "Token expired or revoked. Please re-authorize." });
-        }
-
-        // Never log refresh token values
         const safeMessage = error.message ? error.message.replace(/refresh_token[^\s]*/gi, '[REDACTED]') : 'Unknown error';
         console.error("Sync Main Error:", safeMessage);
         res.status(500).json({ message: "Server error during sync" });
@@ -475,11 +344,72 @@ async function syncNow(req, res) {
 }
 
 
+async function disconnectIntegration(req, res) {
+    try {
+        const integration = await BankIntegration.findByPk(req.params.id);
+
+        if (!integration) {
+            return res.status(404).json({ message: "Integration not found" });
+        }
+
+        if (integration.userId !== req.user.id) {
+            return res.status(403).json({ message: "Forbidden" });
+        }
+
+        integration.isActive = false;
+        integration.refreshToken = '';
+        await integration.save();
+
+        return res.status(200).json({ message: "Integration disconnected" });
+    } catch (error) {
+        console.error("Disconnect Integration Error:", error);
+        res.status(500).json({ message: "Server error" });
+    }
+}
+
+async function debugProcessedEmails(req, res) {
+    try {
+        if (process.env.NODE_ENV === 'production') {
+            return res.status(403).json({ message: "Forbidden" });
+        }
+
+        const integrations = await BankIntegration.findAll({
+            where: { userId: req.user.id, provider: 'Gmail' }
+        });
+
+        if (!integrations || integrations.length === 0) {
+            return res.json({ processedEmails: [] });
+        }
+
+        const integrationIds = integrations.map(i => i.id);
+
+        const processedEmails = await ProcessedEmail.findAll({
+            where: { integrationId: integrationIds },
+            limit: 20,
+            order: [['createdAt', 'DESC']],
+            attributes: ['messageId', 'createdAt', 'integrationId']
+        });
+
+        return res.json({
+            processedEmails: processedEmails.map(pe => ({
+                messageId: pe.messageId,
+                createdAt: pe.createdAt,
+                integrationId: pe.integrationId
+            }))
+        });
+    } catch (error) {
+        console.error("Debug Processed Emails Error:", error);
+        res.status(500).json({ message: "Server error" });
+    }
+}
+
 module.exports = {
     connectGmail,
     gmailCallback,
     getSettings,
     updateSettings,
     updatePreferences,
-    syncNow
+    syncNow,
+    disconnectIntegration,
+    debugProcessedEmails
 };

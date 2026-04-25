@@ -105,5 +105,8 @@ const initializeDatabase = async () => {
 // Immediately initialize database connection on startup
 initializeDatabase();
 
+const { startScheduledSync } = require('./services/scheduledSyncService');
+startScheduledSync();
+
 // Export the Express app directly
 module.exports = app;
