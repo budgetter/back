@@ -30,8 +30,7 @@ async function getDashboardOverview(req, res) {
 
         monthlyTransactions.forEach(t => {
             const amount = parseFloat(t.amount || 0);
-            const type = t.Category ? t.Category.type : t.type;
-            if (type === 'income') monthlyIncome += amount;
+            if (t.type === 'income') monthlyIncome += amount;
             else monthlyExpense += amount;
         });
 
@@ -73,8 +72,7 @@ async function getExpendituresData(req, res) {
 
         transactions.forEach(t => {
             const amount = parseFloat(t.amount || 0);
-            const type = t.Category ? t.Category.type : t.type;
-            if (type === 'income') income += amount;
+            if (t.type === 'income') income += amount;
             else expense += amount;
         });
 
@@ -132,7 +130,7 @@ async function getTransactionsList(req, res) {
                 date: t.date,
                 description: t.description,
                 amount: t.amount,
-                type: t.Category?.type || t.type,
+                type: t.type,
                 categoryId: t.categoryId,
                 walletId: t.walletId,
                 categoryName: t.Category?.name,
@@ -146,7 +144,7 @@ async function getTransactionsList(req, res) {
                 date: rp.nextPaymentDate,
                 description: rp.description,
                 amount: rp.amount,
-                type: rp.Category?.type || rp.type,
+                type: rp.type,
                 categoryId: rp.categoryId,
                 walletId: rp.walletId,
                 categoryName: rp.Category?.name,
@@ -189,7 +187,7 @@ async function getTransactionsList(req, res) {
                 date: t.date,
                 description: t.description,
                 amount: t.amount,
-                type: t.Category?.type || t.type,
+                type: t.type,
                 categoryId: t.categoryId,
                 walletId: t.walletId,
                 categoryName: t.Category?.name,
@@ -208,7 +206,7 @@ async function getTransactionsList(req, res) {
             });
 
             const amt = parseFloat(t.amount || 0);
-            if ((t.Category?.type || t.type) === 'expense') group.dayTotal -= amt;
+            if (t.type === 'expense') group.dayTotal -= amt;
             else group.dayTotal += amt;
         });
 
