@@ -39,12 +39,23 @@ async function connectGmail(req, res, next) {
             }
         }
 
-        passport.authenticate("google", {
-            scope: ["profile", "email", gmailScope],
-            accessType: "offline",
-            prompt: "consent",
+        // Build OAuth URL directly using googleapis instead of passport.authenticate
+        // This ensures the callback URL points to /api/integration/google/callback
+        // (passport.authenticate uses /api/auth/google/callback from the strategy config)
+        const oauth2Client = new google.auth.OAuth2(
+            process.env.GOOGLE_CLIENT_ID,
+            process.env.GOOGLE_CLIENT_SECRET,
+            `${process.env.ORIGIN_URL}/api/integration/google/callback`
+        );
+
+        const authUrl = oauth2Client.generateAuthUrl({
+            access_type: 'offline',
+            prompt: 'consent',
+            scope: ['profile', 'email', gmailScope],
             state: JSON.stringify({ userId: req.user.id, nonce })
-        })(req, res, next);
+        });
+
+        res.redirect(authUrl);
     } catch (error) {
         console.error("Connect Gmail Error:", error);
         res.redirect(`${process.env.ORIGIN_URL}/settings/integrations?status=error`);
