@@ -42,10 +42,11 @@ async function connectGmail(req, res, next) {
         // Build OAuth URL directly using googleapis instead of passport.authenticate
         // This ensures the callback URL points to /api/integration/google/callback
         // (passport.authenticate uses /api/auth/google/callback from the strategy config)
+        const callbackBaseUrl = process.env.API_BASE_URL || process.env.ORIGIN_URL;
         const oauth2Client = new google.auth.OAuth2(
             process.env.GOOGLE_CLIENT_ID,
             process.env.GOOGLE_CLIENT_SECRET,
-            `${process.env.ORIGIN_URL}/api/integration/google/callback`
+            `${callbackBaseUrl}/api/integration/google/callback`
         );
 
         const authUrl = oauth2Client.generateAuthUrl({
@@ -101,10 +102,11 @@ async function gmailCallback(req, res) {
         // Delete nonce after successful validation to prevent replay attacks
         await storedNonce.destroy();
 
+        const callbackBaseUrl = process.env.API_BASE_URL || process.env.ORIGIN_URL;
         const oauth2Client = new google.auth.OAuth2(
             process.env.GOOGLE_CLIENT_ID,
             process.env.GOOGLE_CLIENT_SECRET,
-            `${process.env.ORIGIN_URL}/api/integration/google/callback`
+            `${callbackBaseUrl}/api/integration/google/callback`
         );
 
         const { tokens } = await oauth2Client.getToken(code);
