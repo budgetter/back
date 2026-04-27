@@ -39,14 +39,16 @@ async function connectGmail(req, res, next) {
             }
         }
 
-        // Build OAuth URL directly using googleapis instead of passport.authenticate
-        // This ensures the callback URL points to /api/integration/google/callback
-        // (passport.authenticate uses /api/auth/google/callback from the strategy config)
-        const callbackBaseUrl = process.env.API_BASE_URL || process.env.ORIGIN_URL;
+        // Build the callback URL from the request's own host (same approach as Passport)
+        // This works in both local dev and production without extra env vars
+        const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+        const host = req.headers['x-forwarded-host'] || req.get('host');
+        const callbackUrl = `${protocol}://${host}/api/integration/google/callback`;
+
         const oauth2Client = new google.auth.OAuth2(
             process.env.GOOGLE_CLIENT_ID,
             process.env.GOOGLE_CLIENT_SECRET,
-            `${callbackBaseUrl}/api/integration/google/callback`
+            callbackUrl
         );
 
         const authUrl = oauth2Client.generateAuthUrl({
@@ -102,11 +104,15 @@ async function gmailCallback(req, res) {
         // Delete nonce after successful validation to prevent replay attacks
         await storedNonce.destroy();
 
-        const callbackBaseUrl = process.env.API_BASE_URL || process.env.ORIGIN_URL;
+        // Build callback URL from request host (must match what connectGmail sent to Google)
+        const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+        const host = req.headers['x-forwarded-host'] || req.get('host');
+        const callbackUrl = `${protocol}://${host}/api/integration/google/callback`;
+
         const oauth2Client = new google.auth.OAuth2(
             process.env.GOOGLE_CLIENT_ID,
             process.env.GOOGLE_CLIENT_SECRET,
-            `${callbackBaseUrl}/api/integration/google/callback`
+            callbackUrl
         );
 
         const { tokens } = await oauth2Client.getToken(code);
