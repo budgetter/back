@@ -3,11 +3,9 @@ require("dotenv").config();
 
 class GmailService {
     constructor(refreshToken) {
-        const callbackBaseUrl = process.env.API_BASE_URL || process.env.ORIGIN_URL;
         this.oAuth2Client = new google.auth.OAuth2(
             process.env.GOOGLE_CLIENT_ID,
-            process.env.GOOGLE_CLIENT_SECRET,
-            `${callbackBaseUrl}/api/integration/google/callback`
+            process.env.GOOGLE_CLIENT_SECRET
         );
         this.oAuth2Client.setCredentials({ refresh_token: refreshToken });
         this.gmail = google.gmail({ version: "v1", auth: this.oAuth2Client });
