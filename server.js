@@ -12,6 +12,9 @@ const defaultCategoriesSeeder = require("./models/seeders/20250401-defaultCatego
 const passport = require("./config/passport");
 const app = express();
 
+// Trust proxy headers (Netlify terminates SSL, so req.protocol needs X-Forwarded-Proto)
+app.set('trust proxy', true);
+
 app.use(
   cors({
     origin: process.env.ORIGIN_URL,

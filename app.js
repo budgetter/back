@@ -18,6 +18,9 @@ validateEncryptionKey();
 
 const app = express();
 
+// Trust proxy headers (Netlify terminates SSL, so req.protocol needs X-Forwarded-Proto)
+app.set('trust proxy', true);
+
 // Middleware
 app.use(cors());
 app.use(bodyParser.json());
