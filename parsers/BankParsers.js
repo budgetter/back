@@ -3,8 +3,8 @@ const MAX_BODY_SIZE = 512000; // 500KB in bytes
 class BankParsers {
 
     static getParser(fromEmail) {
-        if (fromEmail.includes("colpatriaInforma@scotiabankcolpatria.com")) {
-            return this.parseColpatria;
+        if (fromEmail.includes("DAVIbankInforma@davibank.com") || fromEmail.includes("colpatriaInforma@scotiabankcolpatria.com")) {
+            return this.parseDavibank;
         } else if (fromEmail.includes("alertasynotificaciones@notificacionesbancolombia.com") || fromEmail.includes("alertasynotificaciones@bancolombia.com.co")) {
             return this.parseBancolombia;
         }
@@ -67,77 +67,74 @@ class BankParsers {
     }
 
 
-    static parseColpatria(body, date) {
+    static parseDavibank(body, date) {
         const startTime = Date.now();
         try {
             body = BankParsers.sanitizeHtml(body);
             if (body === null) return null;
 
-            if (BankParsers._checkTimeout(startTime, 'Colpatria')) return null;
+            if (BankParsers._checkTimeout(startTime, 'Davibank')) return null;
 
-            // Basic HTML stripping for body content analysis if regex fails on raw HTML
-            const tableRegex = /<table.*?>([\s\S]*?)<\/table>/i;
-            const tableMatch = body.match(tableRegex);
+            // New format: key-value table rows like:
+            // <td>Comercio</td><td>DLO*Didi</td>
+            // <td>Monto</td><td>9,950</td>
+            // <td>Fecha</td><td>2026/04/10</td>
+            const rowRegex = /<tr[^>]*>\s*<td[^>]*>(.*?)<\/td>\s*<td[^>]*>(.*?)<\/td>\s*<\/tr>/gi;
+            const fields = {};
+            let match;
 
-            if (BankParsers._checkTimeout(startTime, 'Colpatria')) return null;
-
-            if (tableMatch) {
-                const tableContent = tableMatch[1];
-                const rowRegex = /<tr.*?>([\s\S]*?)<\/tr>/gi;
-                const rows = tableContent.match(rowRegex);
-
-                if (BankParsers._checkTimeout(startTime, 'Colpatria')) return null;
-
-                // Usually row 1 is header, row 2 is data
-                if (rows && rows.length > 1) {
-                    const dataRow = rows[1];
-                    const dataRegex = /<td.*?>(.*?)<\/td>/gi;
-                    const extractedData = [];
-                    let dataMatch;
-
-                    while ((dataMatch = dataRegex.exec(dataRow)) !== null) {
-                        // Basic HTML tag stripping
-                        extractedData.push(dataMatch[1].replace(/<.*?>/g, '').trim());
-                    }
-
-                    if (BankParsers._checkTimeout(startTime, 'Colpatria')) return null;
-
-                    if (extractedData.length >= 4) {
-                        // Index 0: Comercio (Store)
-                        // Index 1: Valor (Amount)
-                        const store = extractedData[0];
-                        const amountStr = extractedData[1].replace(/,/g, '');
-                        const amount = parseFloat(amountStr);
-
-                        if (!BankParsers.validateAmount(amount)) {
-                            console.warn(`Invalid amount parsed from Colpatria email: ${amount}`);
-                            return null;
-                        }
-
-                        const parsedDate = new Date(date);
-                        if (!BankParsers.validateDate(parsedDate)) {
-                            console.warn(`Invalid date parsed from Colpatria email: ${parsedDate}`);
-                            return null;
-                        }
-
-                        let categoryName = "Unknown";
-                        if (store.toLowerCase().includes("didi")) categoryName = "Mother"; // User logic
-                        else if (store.toLowerCase().includes("uber")) categoryName = "Transport";
-
-                        return {
-                            amount,
-                            description: store,
-                            date: parsedDate,
-                            type: "expense",
-                            currency: "COP",
-                            parserId: "Colpatria",
-                            rawCategory: categoryName
-                        };
-                    }
-                }
+            while ((match = rowRegex.exec(body)) !== null) {
+                if (BankParsers._checkTimeout(startTime, 'Davibank')) return null;
+                const key = match[1].replace(/<[^>]*>/g, '').trim().toLowerCase();
+                const value = match[2].replace(/<[^>]*>/g, '').trim();
+                fields[key] = value;
             }
+
+            const store = fields['comercio'] || fields['commerce'] || '';
+            const amountStr = fields['monto'] || fields['valor'] || '';
+            const dateStr = fields['fecha'] || '';
+
+            if (!store || !amountStr) return null;
+
+            // COP amounts: comma and dot are thousands separators, no decimals
+            const amount = parseFloat(amountStr.replace(/[.,]/g, ''));
+
+            if (!BankParsers.validateAmount(amount)) {
+                console.warn(`Invalid amount parsed from Davibank email: ${amount}`);
+                return null;
+            }
+
+            // Parse date from email field or fall back to email internalDate
+            let parsedDate;
+            if (dateStr) {
+                parsedDate = new Date(dateStr.replace(/\//g, '-'));
+            }
+            if (!parsedDate || isNaN(parsedDate.getTime())) {
+                parsedDate = new Date(date);
+            }
+
+            if (!BankParsers.validateDate(parsedDate)) {
+                console.warn(`Invalid date parsed from Davibank email: ${parsedDate}`);
+                return null;
+            }
+
+            let categoryName = "Unknown";
+            const storeLower = store.toLowerCase();
+            if (storeLower.includes("didi")) categoryName = "Mother";
+            else if (storeLower.includes("uber")) categoryName = "Transport";
+            else if (storeLower.includes("rappi")) categoryName = "Food";
+
+            return {
+                amount,
+                description: store,
+                date: parsedDate,
+                type: "expense",
+                currency: "COP",
+                parserId: "Davibank",
+                rawCategory: categoryName
+            };
         } catch (e) {
-            console.error("Error parsing Colpatria:", e);
+            console.error("Error parsing Davibank:", e);
         }
         return null;
     }

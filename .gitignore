@@ -133,3 +133,4 @@ dist
 # Local Netlify folder
 .netlify
 functions-build/
+.DS_Store

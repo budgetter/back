@@ -28,6 +28,7 @@ async function performSync(integration, userId) {
         // Decrypt Token
         const refreshToken = decrypt(integration.refreshToken);
         if (!refreshToken) {
+            console.log("[Sync] No refresh token after decrypt — requiresReauth");
             return {
                 processed: 0,
                 created: 0,
@@ -38,12 +39,13 @@ async function performSync(integration, userId) {
             };
         }
 
+        console.log(`[Sync] Integration ${integration.id} (${integration.email}) — token decrypted OK`);
         const gmailService = new GmailService(refreshToken);
 
         // Define search queries based on supported banks
         const baseQueries = [
-            'from:colpatriaInforma@scotiabankcolpatria.com',
-            'from:alertasynotificaciones@notificacionesbancolombia.com',
+            'from:DAVIbankInforma@davibank.com',
+            'from:alertasynotificaciones@an.notificacionesbancolombia.com',
             'from:alertasynotificaciones@bancolombia.com.co'
         ];
 
@@ -65,6 +67,8 @@ async function performSync(integration, userId) {
             return query;
         });
 
+        console.log(`[Sync] Queries:`, queries);
+
         // Collect all messages across queries, limit total to 50
         const MAX_MESSAGES = 50;
         let allMessages = [];
@@ -76,7 +80,9 @@ async function performSync(integration, userId) {
             try {
                 const remaining = MAX_MESSAGES - allMessages.length;
                 messages = await gmailService.listMessages(`${q} -label:TRASH`, remaining);
+                console.log(`[Sync] Query "${q.substring(0, 40)}..." returned ${messages.length} messages`);
             } catch (listError) {
+                console.error(`[Sync] listMessages error:`, listError.message);
                 // Token error detection: mark inactive and return requiresReauth
                 if (gmailService.isTokenError(listError)) {
                     integration.isActive = false;
@@ -98,6 +104,7 @@ async function performSync(integration, userId) {
 
         // Enforce max 50 total
         allMessages = allMessages.slice(0, MAX_MESSAGES);
+        console.log(`[Sync] Total messages found: ${allMessages.length}`);
 
         // Pre-fetch label ID if addLabel is enabled (once before the loop)
         let budgetterLabelId = null;

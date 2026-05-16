@@ -39,8 +39,6 @@ async function connectGmail(req, res, next) {
             }
         }
 
-        // Build OAuth URL directly using googleapis instead of passport.authenticate
-        // Derive callback from the incoming request so it always points to this backend
         const callbackUrl = `${req.protocol}://${req.get('host')}/api/integration/google/callback`;
         const oauth2Client = new google.auth.OAuth2(
             process.env.GOOGLE_CLIENT_ID,
@@ -66,6 +64,7 @@ async function gmailCallback(req, res) {
     const { code, state } = req.query;
 
     try {
+        console.log("Gmail callback hit. Protocol:", req.protocol, "Host:", req.get('host'), "GMAIL_INTEGRATION_CALLBACK_URL:", process.env.GMAIL_INTEGRATION_CALLBACK_URL ? "SET" : "NOT SET");
         // Validate callback URL uses HTTPS in production
         if (process.env.NODE_ENV === 'production' && !process.env.ORIGIN_URL?.startsWith('https://')) {
             console.error("OAuth callback rejected: ORIGIN_URL must use HTTPS in production");
@@ -138,8 +137,9 @@ async function gmailCallback(req, res) {
         res.redirect(`${process.env.ORIGIN_URL}/settings/integrations?status=success`);
 
     } catch (error) {
-        console.error("Gmail Connect Error:", error);
-        res.redirect(`${process.env.ORIGIN_URL}/settings/integrations?status=error`);
+        console.error("Gmail Connect Error:", error.message, error.response?.data || '');
+        const reason = encodeURIComponent(error.message || 'unknown');
+        res.redirect(`${process.env.ORIGIN_URL}/settings/integrations?status=error&reason=${reason}`);
     }
 }
 
