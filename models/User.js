@@ -26,6 +26,11 @@ const User = sequelize.define('User', {
     defaultValue: 'total',
     comment: 'total = full amount counts in budget, split_only = only your split portion counts',
   },
+  isAdmin: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
   // Additional profile fields can be added here.
 }, {
   tableName: 'users',

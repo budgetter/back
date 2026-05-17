@@ -380,9 +380,46 @@ async function deleteTransaction(req, res) {
 }
 
 
+// Approve a duplicate (mark as not duplicate — keep the transaction)
+const approveDuplicate = async (req, res) => {
+  try {
+    const { Transaction } = require('../models');
+    const tx = await Transaction.findOne({
+      where: { id: req.params.id, UserId: req.user.id }
+    });
+    if (!tx) return res.status(404).json({ message: 'Transaction not found' });
+
+    tx.isDuplicate = false;
+    await tx.save();
+    return res.json({ message: 'Transaction confirmed' });
+  } catch (error) {
+    console.error('Approve duplicate error:', error.message);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Dismiss a duplicate (delete the transaction)
+const dismissDuplicate = async (req, res) => {
+  try {
+    const { Transaction } = require('../models');
+    const tx = await Transaction.findOne({
+      where: { id: req.params.id, UserId: req.user.id, isDuplicate: true }
+    });
+    if (!tx) return res.status(404).json({ message: 'Transaction not found' });
+
+    await tx.destroy();
+    return res.json({ message: 'Duplicate removed' });
+  } catch (error) {
+    console.error('Dismiss duplicate error:', error.message);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
 module.exports = {
   createTransaction,
   getTransactions,
   updateTransaction,
   deleteTransaction,
+  approveDuplicate,
+  dismissDuplicate,
 };

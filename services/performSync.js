@@ -1,6 +1,8 @@
-const { ProcessedEmail, Transaction, Category, sequelize } = require("../models");
+const { ProcessedEmail, Transaction, Category, SyncHistory, ParserConfig, sequelize } = require("../models");
 const GmailService = require("./gmailService");
 const BankParsers = require("../parsers/BankParsers");
+const { applyParser } = require("./parserEngine");
+const categoryResolver = require("./categoryResolver");
 const { v4: uuidv4 } = require("uuid");
 const { decrypt } = require("../utils/encryption");
 
@@ -17,7 +19,8 @@ const { decrypt } = require("../utils/encryption");
  *   where details is an array of { messageId, status, description } entries.
  *   Status values: 'created', 'skipped', 'failed', 'no_parser', 'no_mapping'
  */
-async function performSync(integration, userId) {
+async function performSync(integration, userId, timeBudgetMs = 25000) {
+    const syncStartTime = Date.now();
     let processedCount = 0;
     let createdCount = 0;
     let skippedCount = 0;
@@ -42,17 +45,41 @@ async function performSync(integration, userId) {
         console.log(`[Sync] Integration ${integration.id} (${integration.email}) — token decrypted OK`);
         const gmailService = new GmailService(refreshToken);
 
-        // Define search queries based on supported banks
-        const baseQueries = [
-            'from:DAVIbankInforma@davibank.com',
-            'from:alertasynotificaciones@an.notificacionesbancolombia.com',
-            'from:alertasynotificaciones@bancolombia.com.co'
-        ];
+        // Load active parser configs from DB for this country
+        const country = integration.country || 'CO';
+        const parserConfigs = await ParserConfig.findAll({
+            where: { isActive: true, country },
+        });
 
-        // Compute date filter from syncDaysBack preference
+        // Build Gmail queries from parser configs (fall back to legacy if none configured)
+        let baseQueries;
+        if (parserConfigs.length > 0) {
+            baseQueries = parserConfigs.map(pc => `from:${pc.senderEmail}`);
+            console.log(`[Sync] Using ${parserConfigs.length} DB parser configs for country ${country}`);
+        } else {
+            baseQueries = [
+                'from:DAVIbankInforma@davibank.com',
+                'from:alertasynotificaciones@an.notificacionesbancolombia.com',
+                'from:alertasynotificaciones@bancolombia.com.co'
+            ];
+            console.log(`[Sync] No DB parsers found, using legacy hardcoded queries`);
+        }
+
+        // Compute date filter: use lastSync if available, otherwise syncDaysBack
+        // Cap at syncDaysBack (max 90) to avoid scanning too far back
         const syncDays = integration.syncDaysBack || 30;
-        const sinceDate = new Date();
-        sinceDate.setDate(sinceDate.getDate() - syncDays);
+        const maxDate = new Date();
+        maxDate.setDate(maxDate.getDate() - syncDays);
+
+        let sinceDate;
+        if (integration.lastSync) {
+            sinceDate = new Date(integration.lastSync);
+            // Don't go further back than syncDaysBack
+            if (sinceDate < maxDate) sinceDate = maxDate;
+        } else {
+            sinceDate = maxDate;
+        }
+
         const yyyy = sinceDate.getFullYear();
         const mm = String(sinceDate.getMonth() + 1).padStart(2, '0');
         const dd = String(sinceDate.getDate()).padStart(2, '0');
@@ -69,17 +96,13 @@ async function performSync(integration, userId) {
 
         console.log(`[Sync] Queries:`, queries);
 
-        // Collect all messages across queries, limit total to 50
-        const MAX_MESSAGES = 50;
+        // Collect all messages across queries (no hard limit)
         let allMessages = [];
 
         for (const q of queries) {
-            if (allMessages.length >= MAX_MESSAGES) break;
-
             let messages;
             try {
-                const remaining = MAX_MESSAGES - allMessages.length;
-                messages = await gmailService.listMessages(`${q} -label:TRASH`, remaining);
+                messages = await gmailService.listMessages(`${q} -label:TRASH`);
                 console.log(`[Sync] Query "${q.substring(0, 40)}..." returned ${messages.length} messages`);
             } catch (listError) {
                 console.error(`[Sync] listMessages error:`, listError.message);
@@ -102,9 +125,14 @@ async function performSync(integration, userId) {
             allMessages = allMessages.concat(messages);
         }
 
-        // Enforce max 50 total
-        allMessages = allMessages.slice(0, MAX_MESSAGES);
-        console.log(`[Sync] Total messages found: ${allMessages.length}`);
+        // Deduplicate messages by ID (in case multiple queries return the same email)
+        const seen = new Set();
+        allMessages = allMessages.filter(m => {
+            if (seen.has(m.id)) return false;
+            seen.add(m.id);
+            return true;
+        });
+        console.log(`[Sync] Total unique messages: ${allMessages.length}`);
 
         // Pre-fetch label ID if addLabel is enabled (once before the loop)
         let budgetterLabelId = null;
@@ -118,7 +146,15 @@ async function performSync(integration, userId) {
         }
 
         // Process each message with per-message timeout and error isolation
+        let hasMore = false;
         for (const msgMeta of allMessages) {
+            // Time budget check — stop before serverless timeout
+            if (Date.now() - syncStartTime > timeBudgetMs) {
+                hasMore = true;
+                console.log(`[Sync] Time budget reached (${timeBudgetMs}ms). Stopping with ${allMessages.length - processedCount - skippedCount} messages remaining.`);
+                break;
+            }
+
             const processMessage = async () => {
                 // Check if already processed — skip if exists
                 const isProcessed = await ProcessedEmail.findOne({
@@ -146,10 +182,26 @@ async function performSync(integration, userId) {
                     if (h) fromHeader = h.value;
                 }
 
-                // Parse
-                const parserFunc = BankParsers.getParser(fromHeader);
-                if (!parserFunc) {
-                    // No parser for this sender
+                // Parse — try DB-driven parser first, fall back to legacy
+                let result = null;
+                const matchedConfig = parserConfigs.find(pc =>
+                    fromHeader.toLowerCase().includes(pc.senderEmail.toLowerCase())
+                );
+
+                if (matchedConfig) {
+                    result = applyParser(matchedConfig, body, internalDate);
+                    if (!result) {
+                        console.log(`[Sync] Parser "${matchedConfig.bankName}" returned null for message ${msgMeta.id}. Body snippet: ${body.substring(0, 200)}`);
+                    }
+                } else {
+                    // Legacy fallback
+                    const parserFunc = BankParsers.getParser(fromHeader);
+                    if (parserFunc) {
+                        result = parserFunc(body, internalDate);
+                    }
+                }
+
+                if (!result) {
                     await ProcessedEmail.create({
                         id: uuidv4(),
                         integrationId: integration.id,
@@ -159,25 +211,7 @@ async function performSync(integration, userId) {
                     details.push({
                         messageId: msgMeta.id,
                         status: 'no_parser',
-                        description: 'Unknown sender'
-                    });
-                    return;
-                }
-
-                const result = parserFunc(body, internalDate);
-
-                if (!result) {
-                    // Parser returned null — could not extract data
-                    await ProcessedEmail.create({
-                        id: uuidv4(),
-                        integrationId: integration.id,
-                        messageId: msgMeta.id
-                    });
-                    processedCount++;
-                    details.push({
-                        messageId: msgMeta.id,
-                        status: 'failed',
-                        description: 'Parse returned no result'
+                        description: matchedConfig ? 'Parse returned no result' : 'Unknown sender'
                     });
                     return;
                 }
@@ -203,29 +237,30 @@ async function performSync(integration, userId) {
 
                 let categoryId = map.defaultCategoryId;
 
-                // Try to infer category from parser result
-                if (result.rawCategory && result.rawCategory !== 'Unknown') {
-                    const cat = await Category.findOne({
-                        where: { name: result.rawCategory }
-                    });
-                    if (cat) categoryId = cat.id;
+                // Category resolution chain: user override → global mapping → default
+                const resolvedCategoryId = await categoryResolver.resolve(userId, result.description, country);
+                if (resolvedCategoryId) {
+                    categoryId = resolvedCategoryId;
                 }
 
                 if (!categoryId) {
-                    // No category available — still mark as processed but can't create transaction
-                    await ProcessedEmail.create({
-                        id: uuidv4(),
-                        integrationId: integration.id,
-                        messageId: msgMeta.id
-                    });
-                    processedCount++;
-                    details.push({
-                        messageId: msgMeta.id,
-                        status: 'no_mapping',
-                        description: `No category mapping for ${result.parserId}`
-                    });
-                    return;
+                    // No category — still create transaction with null categoryId
+                    console.log(`[Sync] No category resolved for "${result.description}" — creating with null categoryId`);
                 }
+
+                // Check for possible duplicate (same amount + date + similar description)
+                const { Op } = require('sequelize');
+                const existingTx = await Transaction.findOne({
+                    where: {
+                        UserId: userId,
+                        amount: result.amount,
+                        date: result.date,
+                        type: result.type,
+                    }
+                });
+
+                const isDuplicate = existingTx && existingTx.description &&
+                    existingTx.description.toLowerCase().includes(result.description.toLowerCase().substring(0, 5));
 
                 // Atomic write: ProcessedEmail + Transaction in a single transaction
                 await sequelize.transaction(async (t) => {
@@ -244,7 +279,8 @@ async function performSync(integration, userId) {
                         categoryId: categoryId,
                         UserId: userId,
                         walletId: map.walletId,
-                        source: 'email_sync'
+                        source: 'email_sync',
+                        isDuplicate: isDuplicate || false
                     }, { transaction: t });
                 });
 
@@ -252,8 +288,10 @@ async function performSync(integration, userId) {
                 processedCount++;
                 details.push({
                     messageId: msgMeta.id,
-                    status: 'created',
-                    description: result.description || 'Transaction created'
+                    status: isDuplicate ? 'duplicate' : 'created',
+                    description: isDuplicate
+                        ? `⚠️ Possible duplicate: ${result.description}`
+                        : (result.description || 'Transaction created')
                 });
 
                 // Post-processing: mark as read
@@ -304,12 +342,31 @@ async function performSync(integration, userId) {
                 });
                 // Continue processing remaining messages
             }
+
+            // Rate control: 100ms delay between messages to avoid API quota issues
+            await new Promise(r => setTimeout(r, 100));
         }
 
-        // Only update lastSync if at least one message was processed successfully
-        if (processedCount > 0) {
+        // Only update lastSync when fully complete (not mid-batch)
+        if (processedCount > 0 && !hasMore) {
             integration.lastSync = new Date();
             await integration.save();
+        }
+
+        // Persist sync history
+        try {
+            await SyncHistory.create({
+                id: uuidv4(),
+                integrationId: integration.id,
+                processed: processedCount,
+                created: createdCount,
+                skipped: skippedCount,
+                failed: failedCount,
+                details,
+                syncedAt: new Date(),
+            });
+        } catch (histErr) {
+            console.error('Failed to save sync history:', histErr.message);
         }
 
         return {
@@ -318,7 +375,8 @@ async function performSync(integration, userId) {
             skipped: skippedCount,
             failed: failedCount,
             details,
-            requiresReauth: false
+            requiresReauth: false,
+            hasMore
         };
 
     } catch (error) {

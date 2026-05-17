@@ -24,14 +24,25 @@ class GmailService {
         return false;
     }
 
-    async listMessages(query, maxResults = 50) {
+    async listMessages(query, maxResults = 100) {
+        let allMessages = [];
+        let pageToken = null;
+
         try {
-            const res = await this.gmail.users.messages.list({
-                userId: "me",
-                q: query,
-                maxResults
-            });
-            return res.data.messages || [];
+            do {
+                const params = { userId: "me", q: query, maxResults: Math.min(maxResults, 100) };
+                if (pageToken) params.pageToken = pageToken;
+
+                const res = await this.gmail.users.messages.list(params);
+                const messages = res.data.messages || [];
+                allMessages = allMessages.concat(messages);
+                pageToken = res.data.nextPageToken || null;
+
+                // Rate control: 200ms delay between pages
+                if (pageToken) await new Promise(r => setTimeout(r, 200));
+            } while (pageToken);
+
+            return allMessages;
         } catch (error) {
             // If it's a token error, attempt one automatic refresh and retry
             if (this.isTokenError(error)) {

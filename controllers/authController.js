@@ -70,7 +70,7 @@ const login = async (req, res) => {
 
     // Sign a JWT token with a 30-day expiration
     const token = jwt.sign(
-      { id: user.id, email: user.email },
+      { id: user.id, email: user.email, isAdmin: user.isAdmin },
       process.env.JWT_SECRET,
       { expiresIn: "30d" }
     );
@@ -84,9 +84,11 @@ const login = async (req, res) => {
 // Refresh token — issues a new token if the current one is still valid
 const refreshToken = async (req, res) => {
   try {
-    // req.user is set by authenticateToken middleware
+    const user = await User.findByPk(req.user.id, { attributes: ['id', 'email', 'isAdmin'] });
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
     const token = jwt.sign(
-      { id: req.user.id, email: req.user.email },
+      { id: user.id, email: user.email, isAdmin: user.isAdmin },
       process.env.JWT_SECRET,
       { expiresIn: "30d" }
     );

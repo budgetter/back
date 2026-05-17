@@ -188,6 +188,8 @@ async function getTransactionsList(req, res) {
                 description: t.description,
                 amount: t.amount,
                 type: t.type,
+                source: t.source,
+                isDuplicate: t.isDuplicate,
                 categoryId: t.categoryId,
                 walletId: t.walletId,
                 categoryName: t.Category?.name,

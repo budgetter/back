@@ -5,7 +5,7 @@ class BankParsers {
     static getParser(fromEmail) {
         if (fromEmail.includes("DAVIbankInforma@davibank.com") || fromEmail.includes("colpatriaInforma@scotiabankcolpatria.com")) {
             return this.parseDavibank;
-        } else if (fromEmail.includes("alertasynotificaciones@notificacionesbancolombia.com") || fromEmail.includes("alertasynotificaciones@bancolombia.com.co")) {
+        } else if (fromEmail.includes("alertasynotificaciones@notificacionesbancolombia.com") || fromEmail.includes("alertasynotificaciones@bancolombia.com.co") || fromEmail.includes("alertasynotificaciones@an.notificacionesbancolombia.com")) {
             return this.parseBancolombia;
         }
         return null;
@@ -107,7 +107,10 @@ class BankParsers {
             // Parse date from email field or fall back to email internalDate
             let parsedDate;
             if (dateStr) {
-                parsedDate = new Date(dateStr.replace(/\//g, '-'));
+                const parts = dateStr.match(/(\d{4})\D(\d{1,2})\D(\d{1,2})/);
+                if (parts) {
+                    parsedDate = new Date(parseInt(parts[1]), parseInt(parts[2]) - 1, parseInt(parts[3]));
+                }
             }
             if (!parsedDate || isNaN(parsedDate.getTime())) {
                 parsedDate = new Date(date);

@@ -32,6 +32,11 @@ const Transaction = sequelize.define('Transaction', {
     allowNull: false,
     defaultValue: 'manual',
   },
+  isDuplicate: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
 }, {
   tableName: 'transactions',
   timestamps: true,

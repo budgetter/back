@@ -25,7 +25,7 @@ router.get(
   (req, res) => {
     // Generate a JWT token for the authenticated user.
     const token = jwt.sign(
-      { id: req.user.id, email: req.user.email },
+      { id: req.user.id, email: req.user.email, isAdmin: req.user.isAdmin },
       process.env.JWT_SECRET,
       { expiresIn: "30d" }
     );

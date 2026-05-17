@@ -7,7 +7,7 @@ const rateLimit = require("express-rate-limit");
  */
 const syncRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5,
+  max: 20,
   keyGenerator: (req) => req.user.id,
   standardHeaders: true,
   legacyHeaders: false,

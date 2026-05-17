@@ -52,6 +52,11 @@ const BankIntegration = sequelize.define('BankIntegration', {
         type: DataTypes.DATE,
         allowNull: true,
         defaultValue: null,
+    },
+    country: {
+        type: DataTypes.STRING(5),
+        allowNull: false,
+        defaultValue: 'CO',
     }
 }, {
     tableName: 'BankIntegrations',

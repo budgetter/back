@@ -14,4 +14,8 @@ router.put('/:transactionId', authenticateToken, transactionController.updateTra
 
 router.delete('/:transactionId', authenticateToken, transactionController.deleteTransaction);
 
+// Duplicate resolution
+router.put('/:id/approve-duplicate', authenticateToken, transactionController.approveDuplicate);
+router.delete('/:id/dismiss-duplicate', authenticateToken, transactionController.dismissDuplicate);
+
 module.exports = router;

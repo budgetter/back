@@ -146,7 +146,7 @@ async function gmailCallback(req, res) {
 async function getSettings(req, res) {
     try {
         const integrations = await BankIntegration.findAll({
-            where: { userId: req.user.id, provider: 'Gmail' },
+            where: { userId: req.user.id, provider: 'Gmail', isActive: true },
             include: [{ model: IntegrationMap }]
         });
 
@@ -194,7 +194,7 @@ async function getSettings(req, res) {
 async function updateSettings(req, res) {
     try {
         const { maps } = req.body; // Array of { bankParameter, walletId, defaultCategoryId }
-        const integration = await BankIntegration.findOne({ where: { userId: req.user.id, provider: 'Gmail' } });
+        const integration = await BankIntegration.findOne({ where: { userId: req.user.id, provider: 'Gmail', isActive: true } });
 
         if (!integration) return res.status(404).json({ message: "Integration not found" });
 
@@ -215,6 +215,7 @@ async function updateSettings(req, res) {
                 await existing.save();
             } else {
                 await IntegrationMap.create({
+                    id: require('uuid').v4(),
                     integrationId: integration.id,
                     bankParameter: map.bankParameter,
                     walletId: map.walletId,
@@ -258,9 +259,9 @@ async function updatePreferences(req, res) {
                 return res.status(403).json({ message: "Forbidden" });
             }
         } else {
-            // Backward compatibility: fall back to findOne for the user
+            // Backward compatibility: fall back to findOne for the user (active only)
             integration = await BankIntegration.findOne({
-                where: { userId: req.user.id, provider: 'Gmail' }
+                where: { userId: req.user.id, provider: 'Gmail', isActive: true }
             });
 
             if (!integration) {
@@ -307,6 +308,7 @@ async function syncNow(req, res) {
         let totalFailed = 0;
         let allDetails = [];
         let requiresReauth = false;
+        let hasMore = false;
 
         for (const integration of integrations) {
             try {
@@ -320,6 +322,10 @@ async function syncNow(req, res) {
 
                 if (result.requiresReauth) {
                     requiresReauth = true;
+                }
+
+                if (result.hasMore) {
+                    hasMore = true;
                 }
 
                 // Update nextScheduledSync to 8 hours from now with some jitter
@@ -344,6 +350,11 @@ async function syncNow(req, res) {
 
         if (requiresReauth) {
             response.requiresReauth = true;
+        }
+
+        if (hasMore) {
+            response.hasMore = true;
+            response.message = "Sync partially complete — press Sync again to continue";
         }
 
         return res.json(response);
@@ -415,6 +426,81 @@ async function debugProcessedEmails(req, res) {
     }
 }
 
+async function resetProcessedEmails(req, res) {
+    try {
+        const { deleteTransactions, fromDate, toDate } = req.body || {};
+
+        const integrations = await BankIntegration.findAll({
+            where: { userId: req.user.id, provider: 'Gmail' },
+        });
+
+        if (!integrations.length) return res.status(404).json({ message: 'No integrations found' });
+
+        const integrationIds = integrations.map(i => i.id);
+
+        // Build date filter for ProcessedEmails
+        const where = { integrationId: integrationIds };
+        if (fromDate || toDate) {
+            const { Op } = require('sequelize');
+            where.createdAt = {};
+            if (fromDate) where.createdAt[Op.gte] = new Date(fromDate);
+            if (toDate) where.createdAt[Op.lte] = new Date(toDate + 'T23:59:59');
+        }
+
+        const deleted = await ProcessedEmail.destroy({ where });
+
+        // Optionally delete synced transactions in the date range
+        let txDeleted = 0;
+        if (deleteTransactions) {
+            const txWhere = { UserId: req.user.id, source: 'email_sync' };
+            if (fromDate || toDate) {
+                const { Op } = require('sequelize');
+                txWhere.date = {};
+                if (fromDate) txWhere.date[Op.gte] = fromDate;
+                if (toDate) txWhere.date[Op.lte] = toDate;
+            }
+            txDeleted = await Transaction.destroy({ where: txWhere });
+        }
+
+        // Clear lastSync so next sync uses syncDaysBack
+        for (const integration of integrations) {
+            integration.lastSync = null;
+            await integration.save();
+        }
+
+        const msg = `Cleared ${deleted} processed records${txDeleted ? `, deleted ${txDeleted} transactions` : ''}. Next sync will re-process.`;
+        return res.json({ message: msg, deletedEmails: deleted, deletedTransactions: txDeleted });
+    } catch (error) {
+        console.error('Reset processed emails error:', error.message);
+        return res.status(500).json({ message: 'Server error' });
+    }
+}
+
+async function getSyncHistory(req, res) {
+    try {
+        const integrations = await BankIntegration.findAll({
+            where: { userId: req.user.id, provider: 'Gmail' },
+            attributes: ['id'],
+        });
+
+        if (!integrations.length) return res.json([]);
+
+        const { SyncHistory } = require('../models');
+        const integrationIds = integrations.map(i => i.id);
+
+        const history = await SyncHistory.findAll({
+            where: { integrationId: integrationIds },
+            order: [['syncedAt', 'DESC']],
+            limit: 20,
+        });
+
+        return res.json(history);
+    } catch (error) {
+        console.error('Get sync history error:', error.message);
+        return res.status(500).json({ message: 'Server error' });
+    }
+}
+
 module.exports = {
     connectGmail,
     gmailCallback,
@@ -423,5 +509,7 @@ module.exports = {
     updatePreferences,
     syncNow,
     disconnectIntegration,
-    debugProcessedEmails
+    debugProcessedEmails,
+    getSyncHistory,
+    resetProcessedEmails
 };

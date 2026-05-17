@@ -21,6 +21,10 @@ const ProcessedEmail = require("./ProcessedEmail");
 const SplitInvitation = require("./SplitInvitation");
 const FriendContact = require("./FriendContact");
 const RecurrentSplitConfig = require("./RecurrentSplitConfig");
+const ParserConfig = require("./ParserConfig");
+const GlobalCategoryMapping = require("./GlobalCategoryMapping");
+const UserCategoryMapping = require("./UserCategoryMapping");
+const SyncHistory = require("./SyncHistory");
 
 /* 
    Users and Groups are linked via UserGroup, which includes a Role.
@@ -146,6 +150,16 @@ RecurrentPayment.hasOne(RecurrentSplitConfig, { foreignKey: 'recurrentPaymentId'
 TransactionSplit.belongsTo(SplitInvitation, { foreignKey: 'invitationId' });
 SplitInvitation.hasOne(TransactionSplit, { foreignKey: 'invitationId' });
 
+// UserCategoryMapping associations
+UserCategoryMapping.belongsTo(User, { foreignKey: 'userId' });
+User.hasMany(UserCategoryMapping, { foreignKey: 'userId' });
+UserCategoryMapping.belongsTo(Category, { foreignKey: 'categoryId' });
+Category.hasMany(UserCategoryMapping, { foreignKey: 'categoryId' });
+
+// SyncHistory associations
+SyncHistory.belongsTo(BankIntegration, { foreignKey: 'integrationId' });
+BankIntegration.hasMany(SyncHistory, { foreignKey: 'integrationId' });
+
 module.exports = {
   sequelize,
   User,
@@ -170,4 +184,8 @@ module.exports = {
   SplitInvitation,
   FriendContact,
   RecurrentSplitConfig,
+  ParserConfig,
+  GlobalCategoryMapping,
+  UserCategoryMapping,
+  SyncHistory,
 };
