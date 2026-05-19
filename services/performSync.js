@@ -19,7 +19,7 @@ const { decrypt } = require("../utils/encryption");
  *   where details is an array of { messageId, status, description } entries.
  *   Status values: 'created', 'skipped', 'failed', 'no_parser', 'no_mapping'
  */
-async function performSync(integration, userId, timeBudgetMs = 25000) {
+async function performSync(integration, userId, timeBudgetMs = 8000) {
     const syncStartTime = Date.now();
     let processedCount = 0;
     let createdCount = 0;
