@@ -3,7 +3,6 @@ const router = express.Router();
 const integrationController = require('../controllers/integrationController');
 const userCategoryMappingController = require('../controllers/userCategoryMappingController');
 const { authenticateToken } = require('../middlewares/authMiddleware'); // Assuming this exists
-const { syncRateLimiter } = require('../middlewares/syncRateLimiter');
 const { errorSanitizer } = require('../middlewares/errorSanitizer');
 
 // Connect Flow
@@ -17,7 +16,7 @@ router.get('/google/callback', integrationController.gmailCallback);
 // Settings & Sync
 router.get('/settings', authenticateToken, integrationController.getSettings);
 router.put('/settings', authenticateToken, integrationController.updateSettings);
-router.post('/sync', authenticateToken, syncRateLimiter, integrationController.syncNow);
+router.post('/sync', authenticateToken, integrationController.syncNow);
 
 // Preferences
 router.put('/preferences', authenticateToken, integrationController.updatePreferences);

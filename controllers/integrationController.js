@@ -309,6 +309,8 @@ async function syncNow(req, res) {
         let allDetails = [];
         let requiresReauth = false;
         let hasMore = false;
+        let totalMessages = 0;
+        let remainingMessages = 0;
 
         for (const integration of integrations) {
             try {
@@ -328,6 +330,9 @@ async function syncNow(req, res) {
                     hasMore = true;
                 }
 
+                totalMessages += result.total || 0;
+                remainingMessages += result.remaining || 0;
+
                 // Update nextScheduledSync to 8 hours from now with some jitter
                 const jitter = Math.floor(Math.random() * 3600000); // 0-60 min
                 integration.nextScheduledSync = new Date(Date.now() + 8 * 60 * 60 * 1000 + jitter);
@@ -345,7 +350,9 @@ async function syncNow(req, res) {
             created: totalCreated,
             skipped: totalSkipped,
             failed: totalFailed,
-            details: allDetails
+            details: allDetails,
+            total: totalMessages,
+            remaining: remainingMessages,
         };
 
         if (requiresReauth) {
@@ -438,7 +445,7 @@ async function resetProcessedEmails(req, res) {
 
         const integrationIds = integrations.map(i => i.id);
 
-        // Build date filter for ProcessedEmails
+        // Delete ProcessedEmail records for user's integrations
         const where = { integrationId: integrationIds };
         if (fromDate || toDate) {
             const { Op } = require('sequelize');

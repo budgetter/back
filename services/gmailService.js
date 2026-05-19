@@ -24,13 +24,13 @@ class GmailService {
         return false;
     }
 
-    async listMessages(query, maxResults = 100) {
+    async listMessages(query, maxResults = 500) {
         let allMessages = [];
         let pageToken = null;
 
         try {
             do {
-                const params = { userId: "me", q: query, maxResults: Math.min(maxResults, 100) };
+                const params = { userId: "me", q: query, maxResults: Math.min(maxResults - allMessages.length, 100) };
                 if (pageToken) params.pageToken = pageToken;
 
                 const res = await this.gmail.users.messages.list(params);
@@ -38,11 +38,11 @@ class GmailService {
                 allMessages = allMessages.concat(messages);
                 pageToken = res.data.nextPageToken || null;
 
-                // Rate control: 200ms delay between pages
-                if (pageToken) await new Promise(r => setTimeout(r, 200));
+                if (allMessages.length >= maxResults) break;
+                if (pageToken) await new Promise(r => setTimeout(r, 100));
             } while (pageToken);
 
-            return allMessages;
+            return allMessages.slice(0, maxResults);
         } catch (error) {
             // If it's a token error, attempt one automatic refresh and retry
             if (this.isTokenError(error)) {
