@@ -45,7 +45,7 @@ async function updateProfile(req, res) {
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-    const { name, email, budgetSplitMode } = req.body;
+    const { name, email, budgetSplitMode, numberFormat } = req.body;
 
     // Update fields if provided
     if (name) {
@@ -61,6 +61,9 @@ async function updateProfile(req, res) {
     }
     if (budgetSplitMode && ['total', 'split_only'].includes(budgetSplitMode)) {
       user.budgetSplitMode = budgetSplitMode;
+    }
+    if (numberFormat && ['full', 'short', 'no_decimals'].includes(numberFormat)) {
+      user.numberFormat = numberFormat;
     }
     await user.save();
 

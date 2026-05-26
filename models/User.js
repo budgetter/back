@@ -31,6 +31,12 @@ const User = sequelize.define('User', {
     allowNull: false,
     defaultValue: false,
   },
+  numberFormat: {
+    type: DataTypes.ENUM('full', 'short', 'no_decimals'),
+    allowNull: false,
+    defaultValue: 'full',
+    comment: 'full = 14,000.00 | short = 14K | no_decimals = 14,000',
+  },
   // Additional profile fields can be added here.
 }, {
   tableName: 'users',
