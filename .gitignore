@@ -134,3 +134,4 @@ dist
 .netlify
 functions-build/
 .DS_Store
+.DS_Store

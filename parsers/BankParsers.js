@@ -174,49 +174,61 @@ class BankParsers {
                 }
             }
             // 2. Incoming Transfers (Recibiste)
-            else if (body.includes("Bancolombia: Recibiste")) {
-                const nameMatch = body.match(/de\s([A-Z\s]*)\s[a-z]+/);
+            else if (body.includes("Recibiste") && body.includes("transferencia")) {
+                // Format: "Recibiste una transferencia por $100,000 de MAY OSORNO en tu cuenta"
+                const amountMatch = body.match(/transferencia por \$([\d.,]+)/);
+                if (amountMatch) amount = parseFloat(amountMatch[1].replace(/[.,]/g, ''));
+
+                const nameMatch = body.match(/de\s+([A-Z\s]+?)\s+en\s+tu\s+cuenta/);
                 if (nameMatch) {
                     const personName = nameMatch[1].trim();
                     description = `Received from ${personName}`;
-                    type = "income";
 
                     if (personName.includes("ARREN EL CASTIL")) categoryName = "Arriendo";
                     else if (personName.includes("OSORNO")) categoryName = "Hermanos";
                     else if (personName.includes("SISTEMAS COLOMB")) categoryName = "Bonus";
                     else categoryName = "Income";
-
-                    const amountMatch = body.match(/\$([\d,]+)/);
-                    if (amountMatch) amount = parseFloat(amountMatch[1].replace(/,/g, ''));
+                } else {
+                    description = "Incoming Transfer";
+                    categoryName = "Income";
                 }
+                type = "income";
             }
             // 3. Payment Reception
-            else if (body.includes("Bancolombia le informa recepcion de pago de")) {
+            else if (body.includes("recepcion de pago")) {
                 const nameMatch = body.match(/recepcion de pago de (.+?) por \$/);
                 if (nameMatch) {
                     description = `Payment from ${nameMatch[1].trim()}`;
-                    type = "income";
                     categoryName = "Bonus";
-                    const amountMatch = body.match(/\$([\d,]+)/);
-                    if (amountMatch) amount = parseFloat(amountMatch[1].replace(/,/g, ''));
+                    const amountMatch = body.match(/\$([\d.,]+)/);
+                    if (amountMatch) amount = parseFloat(amountMatch[1].replace(/[.,]/g, ''));
                 }
+                type = "income";
             }
             // 4. Outgoing Transfers (Transferiste)
-            else if (body.includes("Bancolombia: Transferiste")) {
-                const amountMatch = body.match(/\$([\d,]+)/);
+            else if (body.includes("Transferiste")) {
+                const amountMatch = body.match(/\$([\d.,]+)/);
                 if (amountMatch) {
-                    amount = parseFloat(amountMatch[1].replace(/,/g, ''));
-                    description = "Transfer Stats";
-                    categoryName = "Food"; // User default
+                    amount = parseFloat(amountMatch[1].replace(/[.,]/g, ''));
+                    description = "Transfer";
+                    categoryName = "Unknown";
                 }
             }
-            // 5. QR Payments
-            else if (body.includes("Realizaste una transferencia con QR por $")) {
-                const qrAmountMatch = body.match(/\$([\d,]+)/);
-                if (qrAmountMatch) {
-                    amount = parseFloat(qrAmountMatch[1].replace(/,/g, ''));
+            // 5. QR Payments (pagaste ... por codigo QR)
+            else if (body.includes("pagaste") && body.includes("codigo QR")) {
+                const amountMatch = body.match(/pagaste \$([\d.,]+)/);
+                if (amountMatch) {
+                    amount = parseFloat(amountMatch[1].replace(/[.,]/g, ''));
                     description = "QR Payment";
-                    categoryName = "Food"; // User default
+                    categoryName = "Unkown";
+                }
+            }
+            // 6. Generic: any email with "Bancolombia" and a $ amount
+            else if (body.includes("Bancolombia") && body.match(/\$([\d.,]+)/)) {
+                const amountMatch = body.match(/\$([\d.,]+)/);
+                if (amountMatch) {
+                    amount = parseFloat(amountMatch[1].replace(/[.,]/g, ''));
+                    description = "Bancolombia Transaction";
                 }
             }
 
@@ -228,7 +240,15 @@ class BankParsers {
                     return null;
                 }
 
-                const parsedDate = new Date(date);
+                // Try to extract date from body (format: "el 29/03/2026" or "el 29/03/2026")
+                let parsedDate;
+                const dateMatch = body.match(/el\s+(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+                if (dateMatch) {
+                    parsedDate = new Date(parseInt(dateMatch[3]), parseInt(dateMatch[2]) - 1, parseInt(dateMatch[1]));
+                }
+                if (!parsedDate || isNaN(parsedDate.getTime())) {
+                    parsedDate = new Date(date);
+                }
                 if (!BankParsers.validateDate(parsedDate)) {
                     console.warn(`Invalid date parsed from Bancolombia email: ${parsedDate}`);
                     return null;
