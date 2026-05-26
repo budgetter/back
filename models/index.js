@@ -25,6 +25,7 @@ const ParserConfig = require("./ParserConfig");
 const GlobalCategoryMapping = require("./GlobalCategoryMapping");
 const UserCategoryMapping = require("./UserCategoryMapping");
 const SyncHistory = require("./SyncHistory");
+const PushSubscription = require("./PushSubscription");
 
 /* 
    Users and Groups are linked via UserGroup, which includes a Role.
@@ -160,6 +161,10 @@ Category.hasMany(UserCategoryMapping, { foreignKey: 'categoryId' });
 SyncHistory.belongsTo(BankIntegration, { foreignKey: 'integrationId' });
 BankIntegration.hasMany(SyncHistory, { foreignKey: 'integrationId' });
 
+// PushSubscription associations
+PushSubscription.belongsTo(User, { foreignKey: 'userId' });
+User.hasMany(PushSubscription, { foreignKey: 'userId' });
+
 module.exports = {
   sequelize,
   User,
@@ -188,4 +193,5 @@ module.exports = {
   GlobalCategoryMapping,
   UserCategoryMapping,
   SyncHistory,
+  PushSubscription,
 };

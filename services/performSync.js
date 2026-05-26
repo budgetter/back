@@ -244,6 +244,19 @@ async function performSync(integration, userId, timeBudgetMs = 8000) {
       await SyncHistory.create({ id: uuidv4(), integrationId: integration.id, processed: processedCount, created: createdCount, skipped: skippedCount, failed: failedCount, details, syncedAt: new Date() });
     } catch (e) { /* non-critical */ }
 
+    // Push notification: notify user of new transactions
+    if (createdCount > 0 && !hasMore) {
+      try {
+        const pushService = require('./pushService');
+        await pushService.sendToUser(userId, {
+          type: 'sync_complete',
+          title: 'Transactions Synced',
+          body: `${createdCount} new transaction${createdCount > 1 ? 's' : ''} added`,
+          url: '/',
+        });
+      } catch (e) { /* non-critical */ }
+    }
+
     return { processed: processedCount, created: createdCount, skipped: skippedCount, failed: failedCount, details, requiresReauth: false, hasMore, total, remaining: hasMore ? unprocessed.length - batchSize : 0 };
 
   } catch (error) {

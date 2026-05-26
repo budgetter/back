@@ -46,6 +46,7 @@ const dashboardRoutes = require("./routes/dashboard");
 const integrationRoutes = require("./routes/integration");
 const splitRoutes = require("./routes/splits");
 const adminRoutes = require("./routes/admin");
+const pushRoutes = require("./routes/push");
 
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
@@ -62,6 +63,7 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/integration", integrationRoutes);
 app.use("/api/splits", splitRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/push", pushRoutes);
 
 app.get("/api/", (req, res) => {
   res.status(200).send("API is running");
