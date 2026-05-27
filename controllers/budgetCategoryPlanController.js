@@ -1,15 +1,14 @@
-const { BudgetCategoryPlan, BudgetSection } = require("../models");
+const { BudgetCategoryPlan, BudgetSection, UserCategory } = require("../models");
 
 async function addCategoryToSection(req, res) {
   const { sectionId } = req.params;
-  const { categoryId, plannedAmount, type, endDate, fixed } = req.body;
-  if (!categoryId || !plannedAmount || !type) {
+  const { userCategoryId, plannedAmount, type, endDate, fixed } = req.body;
+  if (!userCategoryId || !plannedAmount || !type) {
     return res.status(400).json({
-      message: "Missing required fields: categoryId, plannedAmount, or type",
+      message: "Missing required fields: userCategoryId, plannedAmount, or type",
     });
   }
   try {
-    // 1. Fetch the section to get the budgetId
     const section = await BudgetSection.findByPk(sectionId);
     if (!section) {
       return res.status(404).json({ message: "Section not found" });
@@ -18,7 +17,8 @@ async function addCategoryToSection(req, res) {
     const plan = await BudgetCategoryPlan.create({
       budgetId: section.budgetId,
       sectionId,
-      categoryId,
+      categoryId: null,
+      userCategoryId,
       plannedAmount,
       type,
       endDate: endDate || null,
@@ -37,12 +37,12 @@ async function addCategoryToSection(req, res) {
 
 async function updateCategoryInSection(req, res) {
   const { sectionId, planId } = req.params;
-  const { categoryId, plannedAmount, type, endDate, fixed } = req.body;
+  const { userCategoryId, plannedAmount, type, endDate, fixed } = req.body;
   try {
     const plan = await BudgetCategoryPlan.findOne({ where: { id: planId, sectionId } });
     if (!plan) return res.status(404).json({ message: 'Category plan not found' });
 
-    if (categoryId !== undefined) plan.categoryId = categoryId;
+    if (userCategoryId !== undefined) plan.userCategoryId = userCategoryId;
     if (plannedAmount !== undefined) plan.plannedAmount = plannedAmount;
     if (type !== undefined) plan.type = type;
     plan.endDate = endDate || null;

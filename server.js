@@ -8,6 +8,7 @@ const serverless = require("serverless-http");
 const sequelize = require("./config/database");
 require("./models");
 const defaultCategoriesSeeder = require("./models/seeders/20250401-defaultCategories");
+const systemCategoriesSeeder = require("./models/seeders/20260527-system-categories-hierarchy");
 
 const passport = require("./config/passport");
 const app = express();
@@ -47,6 +48,7 @@ const integrationRoutes = require("./routes/integration");
 const splitRoutes = require("./routes/splits");
 const adminRoutes = require("./routes/admin");
 const pushRoutes = require("./routes/push");
+const userCategoryRoutes = require("./routes/userCategories");
 
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
@@ -64,6 +66,7 @@ app.use("/api/integration", integrationRoutes);
 app.use("/api/splits", splitRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/push", pushRoutes);
+app.use("/api/user-categories", userCategoryRoutes);
 
 app.get("/api/", (req, res) => {
   res.status(200).send("API is running");
@@ -103,6 +106,8 @@ const initializeDatabase = async () => {
       const { Sequelize } = require('sequelize');
       await defaultCategoriesSeeder.up(sequelize.getQueryInterface(), Sequelize);
       console.log("Default categories seeded successfully.");
+      await systemCategoriesSeeder.up(sequelize.getQueryInterface(), Sequelize);
+      console.log("System categories hierarchy seeded successfully.");
     }
   } catch (error) {
     console.error("Unable to connect to the database:", error);

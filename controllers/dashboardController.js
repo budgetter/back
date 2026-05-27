@@ -1,4 +1,4 @@
-const { Transaction, Wallet, Category, RecurrentPayment, TransactionSplit, User, SplitInvitation } = require("../models");
+const { Transaction, Wallet, Category, RecurrentPayment, TransactionSplit, User, SplitInvitation, UserCategory } = require("../models");
 const { Op } = require("sequelize");
 const sequelize = require("../config/database");
 
@@ -7,7 +7,8 @@ const sequelize = require("../config/database");
  */
 async function getDashboardOverview(req, res) {
     const userId = req.user.id;
-    const now = new Date();
+    const { month } = req.query;
+    const now = month ? new Date(month + '-01') : new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
@@ -34,11 +35,15 @@ async function getDashboardOverview(req, res) {
             else monthlyExpense += amount;
         });
 
+        // Count uncategorized transactions this month
+        const uncategorizedCount = monthlyTransactions.filter(t => !t.userCategoryId).length;
+
         return res.json({
             totalBalance,
             monthlyIncome,
             monthlyExpense,
             netSavings: monthlyIncome - monthlyExpense,
+            uncategorizedCount,
             currency: "USD"
         });
     } catch (error) {
@@ -95,14 +100,28 @@ async function getExpendituresData(req, res) {
  */
 async function getTransactionsList(req, res) {
     const userId = req.user.id;
+    const { month } = req.query;
     const today = new Date().toISOString().split('T')[0];
 
+    // Calculate month boundaries (parse without timezone issues)
+    let startOfMonth, endOfMonth;
+    if (month) {
+      const [y, m] = month.split('-').map(Number);
+      startOfMonth = `${y}-${String(m).padStart(2,'0')}-01`;
+      const lastDay = new Date(y, m, 0).getDate();
+      endOfMonth = `${y}-${String(m).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+    } else {
+      const now = new Date();
+      startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+      endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+    }
+
     try {
-        // 1. Upcoming Transactions (Future dated + Recurrent next payment)
+        // 1. Upcoming Transactions (Future dated within month + Recurrent next payment)
         const futureTransactions = await Transaction.findAll({
             where: {
                 UserId: userId,
-                date: { [Op.gt]: today }
+                date: { [Op.gt]: today, [Op.lte]: endOfMonth }
             },
             include: [
                 { model: Category, attributes: ['name', 'icon', 'type'] },
@@ -133,8 +152,9 @@ async function getTransactionsList(req, res) {
                 type: t.type,
                 categoryId: t.categoryId,
                 walletId: t.walletId,
-                categoryName: t.Category?.name,
-                categoryIcon: t.Category?.icon,
+                categoryName: t.userCategory?.customName || t.Category?.name,
+                categoryIcon: t.userCategory?.customIcon || t.Category?.icon,
+                categoryColor: t.userCategory?.color1 || null,
                 walletName: t.Wallet?.name,
                 walletIcon: t.Wallet?.icon,
                 status: 'future'
@@ -156,14 +176,15 @@ async function getTransactionsList(req, res) {
             }))
         ].sort((a, b) => new Date(a.date) - new Date(b.date));
 
-        // 2. Recent Transactions (Today and past, grouped by date)
+        // 2. Recent Transactions (within selected month, up to today)
         const recentRaw = await Transaction.findAll({
             where: {
                 UserId: userId,
-                date: { [Op.lte]: today }
+                date: { [Op.gte]: startOfMonth, [Op.lte]: endOfMonth }
             },
             include: [
                 { model: Category, attributes: ['name', 'icon', 'type'] },
+                { model: UserCategory, as: 'userCategory', attributes: ['id', 'customName', 'customIcon', 'color1', 'color2'], required: false },
                 { model: Wallet, attributes: ['name', 'icon'] },
                 { model: TransactionSplit, include: [
                     { model: User, as: 'debtor', attributes: ['id', 'name', 'email'], required: false },
@@ -192,8 +213,9 @@ async function getTransactionsList(req, res) {
                 isDuplicate: t.isDuplicate,
                 categoryId: t.categoryId,
                 walletId: t.walletId,
-                categoryName: t.Category?.name,
-                categoryIcon: t.Category?.icon,
+                categoryName: t.userCategory?.customName || t.Category?.name,
+                categoryIcon: t.userCategory?.customIcon || t.Category?.icon,
+                categoryColor: t.userCategory?.color1 || null,
                 walletName: t.Wallet?.name,
                 walletIcon: t.Wallet?.icon,
                 TransactionSplits: (t.TransactionSplits || []).map(s => ({

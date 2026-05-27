@@ -14,6 +14,7 @@ const integrationRoutes = require("./routes/integration");
 const splitRoutes = require("./routes/splits");
 const adminRoutes = require("./routes/admin");
 const pushRoutes = require("./routes/push");
+const userCategoryRoutes = require("./routes/userCategories");
 
 // Validate encryption key is set before starting the app
 validateEncryptionKey();
@@ -40,6 +41,7 @@ app.use("/api/integration", integrationRoutes);
 app.use("/api/splits", splitRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/push", pushRoutes);
+app.use("/api/user-categories", userCategoryRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

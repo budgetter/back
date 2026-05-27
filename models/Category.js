@@ -13,7 +13,6 @@ const Category = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false,
     },
-    // TODO: Remove this from here, shouldnt matter
     type: {
       type: DataTypes.ENUM("expense", "income"),
       allowNull: false,
@@ -23,6 +22,32 @@ const Category = sequelize.define(
     },
     icon: {
       type: DataTypes.STRING,
+      allowNull: true,
+    },
+    parentId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+    isSystem: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+    sortOrder: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    translationKey: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    color1: {
+      type: DataTypes.STRING(7),
+      allowNull: true,
+    },
+    color2: {
+      type: DataTypes.STRING(7),
       allowNull: true,
     },
   },

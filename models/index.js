@@ -26,6 +26,7 @@ const GlobalCategoryMapping = require("./GlobalCategoryMapping");
 const UserCategoryMapping = require("./UserCategoryMapping");
 const SyncHistory = require("./SyncHistory");
 const PushSubscription = require("./PushSubscription");
+const UserCategory = require("./UserCategory");
 
 /* 
    Users and Groups are linked via UserGroup, which includes a Role.
@@ -165,6 +166,28 @@ BankIntegration.hasMany(SyncHistory, { foreignKey: 'integrationId' });
 PushSubscription.belongsTo(User, { foreignKey: 'userId' });
 User.hasMany(PushSubscription, { foreignKey: 'userId' });
 
+// Category hierarchy (self-referencing)
+Category.hasMany(Category, { as: 'children', foreignKey: 'parentId' });
+Category.belongsTo(Category, { as: 'parent', foreignKey: 'parentId' });
+
+// UserCategory associations
+UserCategory.belongsTo(User, { foreignKey: 'userId' });
+User.hasMany(UserCategory, { foreignKey: 'userId' });
+UserCategory.belongsTo(Category, { foreignKey: 'categoryId' });
+Category.hasMany(UserCategory, { foreignKey: 'categoryId' });
+UserCategory.hasMany(UserCategory, { as: 'children', foreignKey: 'parentId' });
+UserCategory.belongsTo(UserCategory, { as: 'parent', foreignKey: 'parentId' });
+
+// UserCategory references from transactions/plans/etc
+Transaction.belongsTo(UserCategory, { foreignKey: 'userCategoryId', as: 'userCategory' });
+UserCategory.hasMany(Transaction, { foreignKey: 'userCategoryId' });
+BudgetCategoryPlan.belongsTo(UserCategory, { foreignKey: 'userCategoryId', as: 'userCategory' });
+UserCategory.hasMany(BudgetCategoryPlan, { foreignKey: 'userCategoryId' });
+RecurrentPayment.belongsTo(UserCategory, { foreignKey: 'userCategoryId', as: 'userCategory' });
+UserCategory.hasMany(RecurrentPayment, { foreignKey: 'userCategoryId' });
+Debt.belongsTo(UserCategory, { foreignKey: 'userCategoryId', as: 'userCategory' });
+UserCategory.hasMany(Debt, { foreignKey: 'userCategoryId' });
+
 module.exports = {
   sequelize,
   User,
@@ -194,4 +217,5 @@ module.exports = {
   UserCategoryMapping,
   SyncHistory,
   PushSubscription,
+  UserCategory,
 };

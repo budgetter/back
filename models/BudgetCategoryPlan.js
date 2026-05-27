@@ -19,7 +19,7 @@ const BudgetCategoryPlan = sequelize.define(
     },
     categoryId: {
       type: DataTypes.UUID,
-      allowNull: false,
+      allowNull: true,
     },
     plannedAmount: {
       type: DataTypes.DECIMAL(10, 2),

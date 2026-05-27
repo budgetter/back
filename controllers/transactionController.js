@@ -12,6 +12,7 @@ async function createTransaction(req, res) {
     date,
     type,
     categoryId,
+    userCategoryId,
     GroupId,
     recurrentPaymentId,
     walletId,
@@ -20,8 +21,8 @@ async function createTransaction(req, res) {
     splitMode: requestSplitMode
   } = req.body;
 
-  if (!amount || !type || !categoryId) {
-    return res.status(400).json({ message: 'Missing required fields: amount, type, or categoryId' });
+  if (!amount || !type) {
+    return res.status(400).json({ message: 'Missing required fields: amount or type' });
   }
 
   const splitMode = requestSplitMode || 'even';
@@ -35,7 +36,8 @@ async function createTransaction(req, res) {
       description,
       date: transactionDate,
       type,
-      categoryId,
+      categoryId: categoryId || null,
+      userCategoryId: userCategoryId || null,
       UserId: req.user.id,
       GroupId: GroupId || null,
       recurrentPaymentId: recurrentPaymentId || null,

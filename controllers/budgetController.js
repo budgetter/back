@@ -7,6 +7,7 @@ const {
   UserGroup,
   User,
   TransactionSplit,
+  UserCategory,
 } = require("../models");
 const sequelize = require("../config/database");
 const { Op } = require("sequelize");
@@ -282,7 +283,10 @@ async function getRemainingBudget(req, res) {
               {
                 model: BudgetCategoryPlan,
                 as: "BudgetCategoryPlans",
-                include: [{ model: Category, attributes: ["id", "name", "icon", "type"] }]
+                include: [
+                  { model: Category, attributes: ["id", "name", "icon", "type"] },
+                  { model: UserCategory, as: "userCategory", attributes: ["id", "customName", "customIcon", "color1", "color2", "categoryId"], required: false, include: [{ model: Category, attributes: ["name", "icon", "translationKey"] }] }
+                ]
               }
             ],
           },
@@ -313,7 +317,10 @@ async function getRemainingBudget(req, res) {
               {
                 model: BudgetCategoryPlan,
                 as: "BudgetCategoryPlans",
-                include: [{ model: Category, attributes: ["id", "name", "icon", "type"] }]
+                include: [
+                  { model: Category, attributes: ["id", "name", "icon", "type"] },
+                  { model: UserCategory, as: "userCategory", attributes: ["id", "customName", "customIcon", "color1", "color2", "categoryId"], required: false, include: [{ model: Category, attributes: ["name", "icon", "translationKey"] }] }
+                ]
               }
             ],
           },
@@ -366,7 +373,7 @@ async function getRemainingBudget(req, res) {
     let totalExpense = 0;
 
     transactions.forEach((trans) => {
-      const catId = trans.categoryId;
+      const catId = trans.userCategoryId;
       let amount = parseFloat(trans.amount || 0);
       const category = trans.Category;
       const type = category ? category.type : trans.type;
@@ -451,7 +458,7 @@ async function getRemainingBudget(req, res) {
         // Skip if already processed as 'extra'
         if (typeof plan.id === 'string' && plan.id.startsWith('extra-')) return plan;
 
-        const catData = categoryTotals[plan.categoryId];
+        const catData = categoryTotals[plan.userCategoryId];
         const spent = catData ? catData.amount : 0;
 
         // Use type from Category if available, else from plan
@@ -472,14 +479,18 @@ async function getRemainingBudget(req, res) {
         const planData =
           plan && typeof plan.toJSON === "function" ? plan.toJSON() : plan;
 
+        const uc = plan.userCategory || planData.userCategory;
+        const ucCat = uc?.Category || null;
         return {
           ...planData,
           spent,
           remaining,
           type,
+          userCategoryId: plan.userCategoryId,
           percentageUsed: Math.min(Math.max(percentageUsed, 0), 100),
-          name: plan.Category ? plan.Category.name : (planData.name || 'Unknown'),
-          icon: plan.Category ? plan.Category.icon : (planData.icon || 'FiHelpCircle'),
+          name: uc?.customName || ucCat?.name || (plan.Category ? plan.Category.name : (planData.name || 'Unknown')),
+          icon: uc?.customIcon || ucCat?.icon || (plan.Category ? plan.Category.icon : (planData.icon || null)),
+          color1: uc?.color1 || null,
         };
       });
 

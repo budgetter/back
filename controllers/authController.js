@@ -4,6 +4,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const BudgetService = require("../functions/budgetService");
 const splitResolutionService = require("../services/splitResolutionService");
+const { initializeUserCategories } = require("./userCategoryController");
 require("dotenv").config();
 
 // Register a new user
@@ -28,6 +29,13 @@ const register = async (req, res) => {
 
     // Create a default personal budget for the new user.
     await BudgetService.createDefaultBudget(newUser.id);
+
+    // Create default categories for the new user
+    try {
+      await initializeUserCategories(newUser.id);
+    } catch (catError) {
+      console.error("Failed to initialize categories:", catError);
+    }
 
     // Resolve any pending split invitations for this email (non-blocking for registration)
     try {
