@@ -18,19 +18,21 @@ async function resolve(userId, description, country) {
 
   const descLower = description.toLowerCase();
 
-  // 1. Check user's custom mappings (these already point to categoryId in old system)
+  // 1. Check user's custom mappings (categoryId stores userCategoryId directly)
   const userMappings = await UserCategoryMapping.findAll({
     where: { userId },
   });
 
   for (const mapping of userMappings) {
     if (descLower.includes(mapping.companyPattern.toLowerCase())) {
-      // mapping.categoryId is a system categories.id — find the user_category that links to it
-      const uc = await UserCategory.findOne({
-        where: { userId, categoryId: mapping.categoryId },
-      });
-      if (uc) return uc.id;
-      // Fallback: return null, let default handle it
+      // mapping.categoryId now stores the user_categories.id directly
+      if (mapping.categoryId) {
+        // Verify it exists for this user
+        const uc = await UserCategory.findOne({
+          where: { id: mapping.categoryId, userId },
+        });
+        if (uc) return uc.id;
+      }
       return null;
     }
   }
@@ -42,12 +44,17 @@ async function resolve(userId, description, country) {
 
   for (const mapping of globalMappings) {
     if (descLower.includes(mapping.companyPattern.toLowerCase())) {
-      // Find system category by name
+      // Find system category by translationKey (stable) or name (fallback)
       const category = await Category.findOne({
-        where: { name: { [Op.like]: mapping.categoryName } },
+        where: {
+          isSystem: true,
+          [Op.or]: [
+            { translationKey: mapping.categoryName },
+            { name: { [Op.like]: mapping.categoryName } },
+          ],
+        },
       });
       if (category) {
-        // Find user's copy of this system category
         const uc = await UserCategory.findOne({
           where: { userId, categoryId: category.id },
         });

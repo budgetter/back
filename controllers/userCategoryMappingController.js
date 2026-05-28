@@ -4,9 +4,6 @@ const list = async (req, res) => {
   try {
     const mappings = await UserCategoryMapping.findAll({
       where: { userId: req.user.id },
-      include: [
-        { model: Category, attributes: ['id', 'name', 'icon'] },
-      ],
       order: [['companyPattern', 'ASC']],
     });
 
@@ -15,8 +12,8 @@ const list = async (req, res) => {
       const data = m.toJSON();
       // Find the user_category that links to this system categoryId
       const uc = await UserCategory.findOne({
-        where: { userId: req.user.id, categoryId: m.categoryId },
-        include: [{ model: Category, attributes: ['name', 'icon'] }],
+        where: { id: m.categoryId },
+        include: [{ model: Category, attributes: ['name', 'icon'], required: false }],
       });
       data.userCategory = uc ? {
         id: uc.id,
@@ -42,21 +39,19 @@ const create = async (req, res) => {
       return res.status(400).json({ message: 'companyPattern is required' });
     }
 
-    // Accept either userCategoryId (new) or categoryId (legacy)
-    let resolvedCategoryId = categoryId || null;
-    if (userCategoryId && !resolvedCategoryId) {
-      const uc = await UserCategory.findByPk(userCategoryId);
-      resolvedCategoryId = uc?.categoryId || null;
-    }
-
-    if (!resolvedCategoryId && !userCategoryId) {
+    if (!userCategoryId && !categoryId) {
       return res.status(400).json({ message: 'A category selection is required' });
     }
+
+    // Store the userCategoryId directly
+    const resolvedCategoryId = userCategoryId || categoryId;
 
     const existing = await UserCategoryMapping.findOne({
       where: { userId: req.user.id, companyPattern },
     });
-    if (existing) return res.status(409).json({ message: 'Mapping already exists for this pattern' });
+    if (existing) {
+      return res.status(409).json({ message: 'Mapping already exists for this pattern', existingId: existing.id });
+    }
 
     const { v4: uuidv4 } = require('uuid');
     const mapping = await UserCategoryMapping.create({
@@ -82,8 +77,7 @@ const update = async (req, res) => {
     const { companyPattern, userCategoryId } = req.body;
 
     if (userCategoryId) {
-      const uc = await UserCategory.findByPk(userCategoryId);
-      mapping.categoryId = uc?.categoryId || null;
+      mapping.categoryId = userCategoryId;
     }
     if (companyPattern !== undefined) mapping.companyPattern = companyPattern;
 

@@ -247,10 +247,12 @@ async function updateTransaction(req, res) {
     if (!transaction) return res.status(404).json({ message: 'Transaction not found' });
 
     // Update transaction fields (exclude split-related keys)
-    const safeFields = ['amount', 'description', 'date', 'type', 'categoryId', 'walletId', 'frequency'];
+    const fkFields = ['categoryId', 'userCategoryId', 'walletId'];
+    const safeFields = ['amount', 'description', 'date', 'type', 'categoryId', 'userCategoryId', 'walletId', 'frequency'];
     for (const field of safeFields) {
       if (updateData[field] !== undefined) {
-        transaction[field] = updateData[field];
+        // Coerce empty strings to null for FK fields only
+        transaction[field] = fkFields.includes(field) ? (updateData[field] || null) : updateData[field];
       }
     }
     await transaction.save();

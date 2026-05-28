@@ -57,6 +57,23 @@ class BankParsers {
         return date >= oneYearAgo && date <= oneDayFuture;
     }
 
+    /**
+     * Parse COP amount string. Handles formats like:
+     * "$12.500,00" → 12500
+     * "$12,500.00" → 12500  
+     * "$12.500" → 12500
+     * "$1.234.567" → 1234567
+     */
+    static parseCOPAmount(amountStr) {
+        if (!amountStr) return 0;
+        let clean = amountStr;
+        // Remove trailing decimal cents (,00 or .00)
+        clean = clean.replace(/[,.]00$/, '');
+        // Remove remaining dots and commas (thousands separators)
+        clean = clean.replace(/[.,]/g, '');
+        return parseFloat(clean) || 0;
+    }
+
     static _checkTimeout(startTime, context) {
         const elapsed = Date.now() - startTime;
         if (elapsed > 2000) {
@@ -160,7 +177,7 @@ class BankParsers {
             if (body.includes("Bancolombia informa pago Factura Programada EPM SERVICIOS")) {
                 const amountMatch = body.match(/\$([\d\.]+)/);
                 if (amountMatch) {
-                    amount = parseFloat(amountMatch[1].replace(/\./g, ''));
+                    amount = BankParsers.parseCOPAmount(amountMatch[1]);
                     description = "EPM Services";
                     categoryName = "Home";
                 }
@@ -168,7 +185,7 @@ class BankParsers {
             else if (body.includes("Bancolombia informa pago Factura Programada CLARO SOLUCION")) {
                 const amountMatch = body.match(/\$([\d.]+)/);
                 if (amountMatch) {
-                    amount = parseFloat(amountMatch[1].replace(/\./g, ''));
+                    amount = BankParsers.parseCOPAmount(amountMatch[1]);
                     description = "Claro Solutions";
                     categoryName = "Home";
                 }
@@ -177,7 +194,7 @@ class BankParsers {
             else if (body.includes("Recibiste") && body.includes("transferencia")) {
                 // Format: "Recibiste una transferencia por $100,000 de MAY OSORNO en tu cuenta"
                 const amountMatch = body.match(/transferencia por \$([\d.,]+)/);
-                if (amountMatch) amount = parseFloat(amountMatch[1].replace(/[.,]/g, ''));
+                if (amountMatch) amount = BankParsers.parseCOPAmount(amountMatch[1]);
 
                 const nameMatch = body.match(/de\s+([A-Z\s]+?)\s+en\s+tu\s+cuenta/);
                 if (nameMatch) {
@@ -201,7 +218,7 @@ class BankParsers {
                     description = `Payment from ${nameMatch[1].trim()}`;
                     categoryName = "Bonus";
                     const amountMatch = body.match(/\$([\d.,]+)/);
-                    if (amountMatch) amount = parseFloat(amountMatch[1].replace(/[.,]/g, ''));
+                    if (amountMatch) amount = BankParsers.parseCOPAmount(amountMatch[1]);
                 }
                 type = "income";
             }
@@ -209,7 +226,7 @@ class BankParsers {
             else if (body.includes("Transferiste")) {
                 const amountMatch = body.match(/\$([\d.,]+)/);
                 if (amountMatch) {
-                    amount = parseFloat(amountMatch[1].replace(/[.,]/g, ''));
+                    amount = BankParsers.parseCOPAmount(amountMatch[1]);
                     description = "Transfer";
                     categoryName = "Unknown";
                 }
@@ -218,7 +235,7 @@ class BankParsers {
             else if (body.includes("pagaste") && body.includes("codigo QR")) {
                 const amountMatch = body.match(/pagaste \$([\d.,]+)/);
                 if (amountMatch) {
-                    amount = parseFloat(amountMatch[1].replace(/[.,]/g, ''));
+                    amount = BankParsers.parseCOPAmount(amountMatch[1]);
                     description = "QR Payment";
                     categoryName = "Unkown";
                 }
@@ -227,7 +244,7 @@ class BankParsers {
             else if (body.includes("Bancolombia") && body.match(/\$([\d.,]+)/)) {
                 const amountMatch = body.match(/\$([\d.,]+)/);
                 if (amountMatch) {
-                    amount = parseFloat(amountMatch[1].replace(/[.,]/g, ''));
+                    amount = BankParsers.parseCOPAmount(amountMatch[1]);
                     description = "Bancolombia Transaction";
                 }
             }

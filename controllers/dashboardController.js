@@ -152,9 +152,10 @@ async function getTransactionsList(req, res) {
                 type: t.type,
                 categoryId: t.categoryId,
                 walletId: t.walletId,
-                categoryName: t.userCategory?.customName || t.Category?.name,
-                categoryIcon: t.userCategory?.customIcon || t.Category?.icon,
+                categoryName: t.userCategory?.customName || t.userCategory?.Category?.name || t.Category?.name || null,
+                categoryIcon: t.userCategory?.customIcon || t.userCategory?.Category?.icon || t.Category?.icon || null,
                 categoryColor: t.userCategory?.color1 || null,
+                userCategoryId: t.userCategoryId || null,
                 walletName: t.Wallet?.name,
                 walletIcon: t.Wallet?.icon,
                 status: 'future'
@@ -184,7 +185,7 @@ async function getTransactionsList(req, res) {
             },
             include: [
                 { model: Category, attributes: ['name', 'icon', 'type'] },
-                { model: UserCategory, as: 'userCategory', attributes: ['id', 'customName', 'customIcon', 'color1', 'color2'], required: false },
+                { model: UserCategory, as: 'userCategory', attributes: ['id', 'customName', 'customIcon', 'color1', 'color2', 'categoryId'], required: false, include: [{ model: Category, attributes: ['name', 'icon'], required: false }] },
                 { model: Wallet, attributes: ['name', 'icon'] },
                 { model: TransactionSplit, include: [
                     { model: User, as: 'debtor', attributes: ['id', 'name', 'email'], required: false },
@@ -213,9 +214,10 @@ async function getTransactionsList(req, res) {
                 isDuplicate: t.isDuplicate,
                 categoryId: t.categoryId,
                 walletId: t.walletId,
-                categoryName: t.userCategory?.customName || t.Category?.name,
-                categoryIcon: t.userCategory?.customIcon || t.Category?.icon,
+                categoryName: t.userCategory?.customName || t.userCategory?.Category?.name || t.Category?.name || null,
+                categoryIcon: t.userCategory?.customIcon || t.userCategory?.Category?.icon || t.Category?.icon || null,
                 categoryColor: t.userCategory?.color1 || null,
+                userCategoryId: t.userCategoryId || null,
                 walletName: t.Wallet?.name,
                 walletIcon: t.Wallet?.icon,
                 TransactionSplits: (t.TransactionSplits || []).map(s => ({

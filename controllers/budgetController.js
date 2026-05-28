@@ -365,6 +365,7 @@ async function getRemainingBudget(req, res) {
       where: transactionWhere,
       include: [
         { model: Category, attributes: ["id", "name", "icon", "type"] },
+        { model: UserCategory, as: "userCategory", attributes: ["id", "customName", "customIcon", "color1", "categoryId"], required: false, include: [{ model: Category, attributes: ["name", "icon", "type"], required: false }] },
         { model: TransactionSplit, attributes: ["amount"] },
       ],
     });
@@ -380,9 +381,11 @@ async function getRemainingBudget(req, res) {
 
     transactions.forEach((trans) => {
       const catId = trans.userCategoryId;
+      if (!catId) return; // Skip uncategorized
       let amount = parseFloat(trans.amount || 0);
+      const uc = trans.userCategory;
       const category = trans.Category;
-      const type = category ? category.type : trans.type;
+      const type = uc?.Category?.type || category?.type || trans.type;
 
       // If split_only mode, subtract split portions to get owner's share
       if (splitMode === 'split_only' && trans.TransactionSplits && trans.TransactionSplits.length > 0) {
@@ -393,8 +396,9 @@ async function getRemainingBudget(req, res) {
       if (!categoryTotals[catId]) {
         categoryTotals[catId] = {
           amount: 0,
-          name: category ? category.name : "Unknown",
-          icon: category ? category.icon : "FiHelpCircle",
+          name: uc?.customName || uc?.Category?.name || category?.name || "Unknown",
+          icon: uc?.customIcon || uc?.Category?.icon || category?.icon || null,
+          color1: uc?.color1 || null,
           type: type
         };
       }

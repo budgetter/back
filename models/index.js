@@ -155,8 +155,7 @@ SplitInvitation.hasOne(TransactionSplit, { foreignKey: 'invitationId' });
 // UserCategoryMapping associations
 UserCategoryMapping.belongsTo(User, { foreignKey: 'userId' });
 User.hasMany(UserCategoryMapping, { foreignKey: 'userId' });
-UserCategoryMapping.belongsTo(Category, { foreignKey: 'categoryId' });
-Category.hasMany(UserCategoryMapping, { foreignKey: 'categoryId' });
+// UserCategoryMapping.categoryId now stores user_categories.id directly (no FK to categories)
 
 // SyncHistory associations
 SyncHistory.belongsTo(BankIntegration, { foreignKey: 'integrationId' });
