@@ -81,7 +81,13 @@ async function getBudget(req, res) {
         {
           model: BudgetSection,
           as: "sections",
-          include: [{ model: BudgetCategoryPlan, as: "BudgetCategoryPlans" }],
+          include: [{
+            model: BudgetCategoryPlan,
+            as: "BudgetCategoryPlans",
+            include: [
+              { model: UserCategory, as: "userCategory", attributes: ["id", "customName", "customIcon", "color1", "color2", "categoryId"], required: false, include: [{ model: Category, attributes: ["name", "icon", "translationKey"] }] }
+            ]
+          }],
         },
       ],
     });
