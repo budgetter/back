@@ -453,7 +453,11 @@ async function getRemainingBudget(req, res) {
     }
 
     const sectionsWithRemaining = budget.sections.map((section) => {
-      const plans = section.BudgetCategoryPlans || [];
+      const plans = (section.BudgetCategoryPlans || []).filter(plan => {
+        // Exclude plans that expired before this month
+        if (!plan.endDate) return true;
+        return plan.endDate >= startDate;
+      });
       const updatedCategories = plans.map((plan) => {
         // Skip if already processed as 'extra'
         if (typeof plan.id === 'string' && plan.id.startsWith('extra-')) return plan;

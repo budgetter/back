@@ -174,10 +174,10 @@ async function performSync(integration, userId, timeBudgetMs = 8000) {
           continue;
         }
 
-        // Category resolution
-        let categoryId = map.defaultCategoryId;
+        // Category resolution (returns userCategoryId)
+        let userCategoryId = null;
         const resolved = await categoryResolver.resolve(userId, result.description, country);
-        if (resolved) categoryId = resolved;
+        if (resolved) userCategoryId = resolved;
 
         // Duplicate check: flag if same amount + date + type already exists for this user
         const existingTx = await Transaction.findOne({
@@ -192,7 +192,7 @@ async function performSync(integration, userId, timeBudgetMs = 8000) {
             { transaction: t }
           );
           await Transaction.create(
-            { id: uuidv4(), amount: result.amount, description: result.description, date: result.date, type: result.type, categoryId, UserId: userId, walletId: map.walletId, source: 'email_sync', isDuplicate },
+            { id: uuidv4(), amount: result.amount, description: result.description, date: result.date, type: result.type, categoryId: null, userCategoryId, UserId: userId, walletId: map.walletId, source: 'email_sync', isDuplicate },
             { transaction: t }
           );
         });

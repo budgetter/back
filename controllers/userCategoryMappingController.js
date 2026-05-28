@@ -1,13 +1,33 @@
-const { UserCategoryMapping, Category } = require('../models');
+const { UserCategoryMapping, Category, UserCategory } = require('../models');
 
 const list = async (req, res) => {
   try {
     const mappings = await UserCategoryMapping.findAll({
       where: { userId: req.user.id },
-      include: [{ model: Category, attributes: ['id', 'name', 'icon'] }],
+      include: [
+        { model: Category, attributes: ['id', 'name', 'icon'] },
+      ],
       order: [['companyPattern', 'ASC']],
     });
-    return res.json(mappings);
+
+    // Enrich with user category info for display
+    const enriched = await Promise.all(mappings.map(async (m) => {
+      const data = m.toJSON();
+      // Find the user_category that links to this system categoryId
+      const uc = await UserCategory.findOne({
+        where: { userId: req.user.id, categoryId: m.categoryId },
+        include: [{ model: Category, attributes: ['name', 'icon'] }],
+      });
+      data.userCategory = uc ? {
+        id: uc.id,
+        name: uc.customName || uc.Category?.name || 'Unknown',
+        icon: uc.customIcon || uc.Category?.icon || '📂',
+        color1: uc.color1,
+      } : null;
+      return data;
+    }));
+
+    return res.json(enriched);
   } catch (error) {
     console.error('List user category mappings error:', error.message);
     return res.status(500).json({ message: 'Server error' });
@@ -16,14 +36,22 @@ const list = async (req, res) => {
 
 const create = async (req, res) => {
   try {
-    const { companyPattern, categoryId } = req.body;
+    const { companyPattern, categoryId, userCategoryId } = req.body;
 
-    if (!companyPattern || !categoryId) {
-      return res.status(400).json({ message: 'companyPattern and categoryId are required' });
+    if (!companyPattern) {
+      return res.status(400).json({ message: 'companyPattern is required' });
     }
 
-    const category = await Category.findByPk(categoryId);
-    if (!category) return res.status(400).json({ message: 'Category not found' });
+    // Accept either userCategoryId (new) or categoryId (legacy)
+    let resolvedCategoryId = categoryId || null;
+    if (userCategoryId && !resolvedCategoryId) {
+      const uc = await UserCategory.findByPk(userCategoryId);
+      resolvedCategoryId = uc?.categoryId || null;
+    }
+
+    if (!resolvedCategoryId && !userCategoryId) {
+      return res.status(400).json({ message: 'A category selection is required' });
+    }
 
     const existing = await UserCategoryMapping.findOne({
       where: { userId: req.user.id, companyPattern },
@@ -31,7 +59,12 @@ const create = async (req, res) => {
     if (existing) return res.status(409).json({ message: 'Mapping already exists for this pattern' });
 
     const { v4: uuidv4 } = require('uuid');
-    const mapping = await UserCategoryMapping.create({ id: uuidv4(), userId: req.user.id, companyPattern, categoryId });
+    const mapping = await UserCategoryMapping.create({
+      id: uuidv4(),
+      userId: req.user.id,
+      companyPattern,
+      categoryId: resolvedCategoryId,
+    });
     return res.status(201).json(mapping);
   } catch (error) {
     console.error('Create user category mapping error:', error.message);
@@ -46,12 +79,11 @@ const update = async (req, res) => {
     });
     if (!mapping) return res.status(404).json({ message: 'Mapping not found' });
 
-    const { companyPattern, categoryId } = req.body;
+    const { companyPattern, userCategoryId } = req.body;
 
-    if (categoryId) {
-      const category = await Category.findByPk(categoryId);
-      if (!category) return res.status(400).json({ message: 'Category not found' });
-      mapping.categoryId = categoryId;
+    if (userCategoryId) {
+      const uc = await UserCategory.findByPk(userCategoryId);
+      mapping.categoryId = uc?.categoryId || null;
     }
     if (companyPattern !== undefined) mapping.companyPattern = companyPattern;
 
