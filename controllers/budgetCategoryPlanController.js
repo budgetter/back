@@ -1,4 +1,4 @@
-const { BudgetCategoryPlan, BudgetSection, UserCategory } = require("../models");
+const { BudgetCategoryPlan, BudgetSection, UserCategory, Category } = require("../models");
 
 async function addCategoryToSection(req, res) {
   const { sectionId } = req.params;
@@ -24,9 +24,12 @@ async function addCategoryToSection(req, res) {
       endDate: endDate || null,
       fixed: fixed || false,
     });
+    const enrichedPlan = await BudgetCategoryPlan.findByPk(plan.id, {
+      include: [{ model: UserCategory, as: "userCategory", required: false, include: [{ model: Category, attributes: ["name", "icon", "translationKey"] }] }]
+    });
     return res
       .status(201)
-      .json({ message: "Category added to section successfully", plan });
+      .json({ message: "Category added to section successfully", plan: enrichedPlan });
   } catch (error) {
     console.error("Error adding category to section:", error);
     return res
@@ -37,7 +40,7 @@ async function addCategoryToSection(req, res) {
 
 async function updateCategoryInSection(req, res) {
   const { sectionId, planId } = req.params;
-  const { userCategoryId, plannedAmount, type, endDate, fixed } = req.body;
+  const { userCategoryId, plannedAmount, type, endDate, fixed, disabled } = req.body;
   try {
     const plan = await BudgetCategoryPlan.findOne({ where: { id: planId, sectionId } });
     if (!plan) return res.status(404).json({ message: 'Category plan not found' });
@@ -47,9 +50,13 @@ async function updateCategoryInSection(req, res) {
     if (type !== undefined) plan.type = type;
     plan.endDate = endDate || null;
     plan.fixed = fixed !== undefined ? fixed : plan.fixed;
+    if (disabled !== undefined) plan.disabled = disabled;
 
     await plan.save();
-    return res.json({ message: 'Category plan updated successfully', plan });
+    const enrichedPlan = await BudgetCategoryPlan.findByPk(plan.id, {
+      include: [{ model: UserCategory, as: "userCategory", required: false, include: [{ model: Category, attributes: ["name", "icon", "translationKey"] }] }]
+    });
+    return res.json({ message: 'Category plan updated successfully', plan: enrichedPlan });
   } catch (error) {
     console.error('Error updating category plan:', error);
     return res.status(500).json({ message: 'Server error while updating category plan' });

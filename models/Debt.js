@@ -37,6 +37,19 @@ const Debt = sequelize.define(
       type: DataTypes.UUID,
       allowNull: true,
     },
+    userId: {
+      type: DataTypes.UUID,
+      allowNull: false,
+    },
+    paymentDay: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+    countsTowardsBudget: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
+    },
   },
   {
     tableName: "debts",

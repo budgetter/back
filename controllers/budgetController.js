@@ -8,6 +8,7 @@ const {
   User,
   TransactionSplit,
   UserCategory,
+  Debt,
 } = require("../models");
 const sequelize = require("../config/database");
 const { Op } = require("sequelize");
@@ -381,8 +382,7 @@ async function getRemainingBudget(req, res) {
     let totalExpense = 0;
 
     transactions.forEach((trans) => {
-      const catId = trans.userCategoryId;
-      if (!catId) return; // Skip uncategorized
+      const catId = trans.userCategoryId || 'uncategorized';
       let amount = parseFloat(trans.amount || 0);
       const uc = trans.userCategory;
       const category = trans.Category;
@@ -397,9 +397,9 @@ async function getRemainingBudget(req, res) {
       if (!categoryTotals[catId]) {
         categoryTotals[catId] = {
           amount: 0,
-          name: uc?.customName || uc?.Category?.name || category?.name || "Unknown",
-          icon: uc?.customIcon || uc?.Category?.icon || category?.icon || null,
-          color1: uc?.color1 || null,
+          name: catId === 'uncategorized' ? 'Unknown' : (uc?.customName || uc?.Category?.name || category?.name || "Unknown"),
+          icon: catId === 'uncategorized' ? '❓' : (uc?.customIcon || uc?.Category?.icon || category?.icon || null),
+          color1: catId === 'uncategorized' ? '#6b7280' : (uc?.color1 || null),
           type: type
         };
       }
@@ -412,13 +412,13 @@ async function getRemainingBudget(req, res) {
       }
     });
 
-    // Collect all categoryIds from budget plans
+    // Collect all categoryIds from budget plans (exclude disabled)
     const budgetCategoryIds = new Set();
     const budgetSections = budget.sections || [];
     budgetSections.forEach((section) => {
       const plans = section.BudgetCategoryPlans || [];
       plans.forEach((plan) => {
-        budgetCategoryIds.add(plan.categoryId);
+        if (!plan.disabled) budgetCategoryIds.add(plan.userCategoryId);
       });
     });
 
@@ -473,7 +473,8 @@ async function getRemainingBudget(req, res) {
         // Skip if already processed as 'extra'
         if (typeof plan.id === 'string' && plan.id.startsWith('extra-')) return plan;
 
-        const catData = categoryTotals[plan.userCategoryId];
+        const isDisabled = plan.disabled || false;
+        const catData = !isDisabled ? categoryTotals[plan.userCategoryId] : null;
         const spent = catData ? catData.amount : 0;
 
         // Use type from Category if available, else from plan
@@ -522,9 +523,52 @@ async function getRemainingBudget(req, res) {
 
     const budgetPlain = budget && typeof budget.toJSON === "function" ? budget.toJSON() : budget;
 
+    // Build virtual Debts section from user's debts with countsTowardsBudget=true
+    const debts = await Debt.findAll({ where: { userId, countsTowardsBudget: true } });
+    let debtsSection = null;
+    if (debts.length > 0) {
+      const debtCategories = [];
+      for (const debt of debts) {
+        // Sum debt_payment transactions for this debt in the current month
+        const [spentResult] = await sequelize.query(
+          `SELECT COALESCE(SUM(t.amount), 0) as spent FROM transactions t
+           INNER JOIN transaction_links tl ON tl.transactionId = t.id
+           WHERE tl.debtId = :debtId AND tl.linkType = 'debt_payment'
+           AND t.date BETWEEN :startDate AND :endDate`,
+          { replacements: { debtId: debt.id, startDate, endDate }, type: sequelize.QueryTypes.SELECT }
+        );
+        const spent = parseFloat(spentResult?.spent || 0);
+        const planned = parseFloat(debt.monthlyPayment);
+        const remaining = planned - spent;
+        const percentageUsed = planned > 0 ? (spent / planned) * 100 : 0;
+
+        // Check if debt's userCategoryId is already in budget plans
+        const duplicateWarning = debt.userCategoryId ? budgetCategoryIds.has(debt.userCategoryId) : false;
+
+        debtCategories.push({
+          id: `debt-${debt.id}`,
+          debtId: debt.id,
+          name: debt.bankName,
+          icon: '🏦',
+          color1: '#ef4444',
+          plannedAmount: planned,
+          spent,
+          remaining,
+          percentageUsed: Math.min(percentageUsed, 100),
+          type: 'expense',
+          isVirtual: true,
+          duplicateWarning,
+          paymentDay: debt.paymentDay,
+        });
+      }
+      debtsSection = { id: 'debts-virtual', name: 'Debts', isVirtual: true, categories: debtCategories };
+    }
+
+    const finalSections = debtsSection ? [...sectionsWithRemaining, debtsSection] : sectionsWithRemaining;
+
     return res.json({
       budget: budgetPlain,
-      sections: sectionsWithRemaining,
+      sections: finalSections,
       stats: {
         totalIncome,
         totalExpense,

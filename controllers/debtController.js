@@ -22,6 +22,7 @@ async function createDebt(req, res) {
     annualRate,
     creditNumber,
     linkedWalletId,
+    paymentDay,
   } = req.body;
 
   if (
@@ -35,6 +36,10 @@ async function createDebt(req, res) {
     return res.status(400).json({ message: "Missing required debt fields" });
   }
 
+  if (paymentDay !== undefined && paymentDay !== null && (paymentDay < 1 || paymentDay > 31)) {
+    return res.status(400).json({ message: "paymentDay must be between 1 and 31" });
+  }
+
   try {
     const debt = await Debt.create({
       id: uuidv4(),
@@ -46,6 +51,7 @@ async function createDebt(req, res) {
       annualRate,
       creditNumber,
       linkedWalletId: linkedWalletId || null,
+      paymentDay: paymentDay || null,
     });
     return res.status(201).json({ debt });
   } catch (error) {
@@ -58,6 +64,12 @@ async function updateDebt(req, res) {
   const userId = req.user.id;
   const { debtId } = req.params;
   const updateData = req.body;
+
+  if (updateData.paymentDay !== undefined && updateData.paymentDay !== null && (updateData.paymentDay < 1 || updateData.paymentDay > 31)) {
+    return res.status(400).json({ message: "paymentDay must be between 1 and 31" });
+  }
+  if (updateData.linkedWalletId !== undefined) updateData.linkedWalletId = updateData.linkedWalletId || null;
+
   try {
     const debt = await Debt.findOne({ where: { id: debtId, userId } });
     if (!debt) {
