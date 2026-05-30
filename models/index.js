@@ -27,6 +27,7 @@ const UserCategoryMapping = require("./UserCategoryMapping");
 const SyncHistory = require("./SyncHistory");
 const PushSubscription = require("./PushSubscription");
 const UserCategory = require("./UserCategory");
+const TransactionLink = require("./TransactionLink");
 
 /* 
    Users and Groups are linked via UserGroup, which includes a Role.
@@ -187,6 +188,12 @@ UserCategory.hasMany(RecurrentPayment, { foreignKey: 'userCategoryId' });
 Debt.belongsTo(UserCategory, { foreignKey: 'userCategoryId', as: 'userCategory' });
 UserCategory.hasMany(Debt, { foreignKey: 'userCategoryId' });
 
+// TransactionLink associations
+Transaction.hasOne(TransactionLink, { foreignKey: 'transactionId', as: 'transactionLink' });
+TransactionLink.belongsTo(Transaction, { foreignKey: 'transactionId' });
+TransactionLink.belongsTo(Wallet, { foreignKey: 'toWalletId', as: 'toWallet' });
+TransactionLink.belongsTo(Debt, { foreignKey: 'debtId' });
+
 module.exports = {
   sequelize,
   User,
@@ -217,4 +224,5 @@ module.exports = {
   SyncHistory,
   PushSubscription,
   UserCategory,
+  TransactionLink,
 };

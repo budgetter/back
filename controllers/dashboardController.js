@@ -1,4 +1,4 @@
-const { Transaction, Wallet, Category, RecurrentPayment, TransactionSplit, User, SplitInvitation, UserCategory } = require("../models");
+const { Transaction, Wallet, Category, RecurrentPayment, TransactionSplit, User, SplitInvitation, UserCategory, TransactionLink } = require("../models");
 const { Op } = require("sequelize");
 const sequelize = require("../config/database");
 
@@ -21,7 +21,8 @@ async function getDashboardOverview(req, res) {
         const monthlyTransactions = await Transaction.findAll({
             where: {
                 UserId: userId,
-                date: { [Op.between]: [startOfMonth.toISOString().split('T')[0], endOfMonth.toISOString().split('T')[0]] }
+                date: { [Op.between]: [startOfMonth.toISOString().split('T')[0], endOfMonth.toISOString().split('T')[0]] },
+                excludeFromBudget: { [Op.ne]: true },
             },
             include: [{ model: Category, attributes: ['type'] }]
         });
@@ -67,7 +68,8 @@ async function getExpendituresData(req, res) {
         const transactions = await Transaction.findAll({
             where: {
                 UserId: userId,
-                date: { [Op.between]: [startOfMonth.toISOString().split('T')[0], endOfMonth.toISOString().split('T')[0]] }
+                date: { [Op.between]: [startOfMonth.toISOString().split('T')[0], endOfMonth.toISOString().split('T')[0]] },
+                excludeFromBudget: { [Op.ne]: true },
             },
             include: [{ model: Category, attributes: ['type'] }]
         });
@@ -187,6 +189,7 @@ async function getTransactionsList(req, res) {
                 { model: Category, attributes: ['name', 'icon', 'type'] },
                 { model: UserCategory, as: 'userCategory', attributes: ['id', 'customName', 'customIcon', 'color1', 'color2', 'categoryId'], required: false, include: [{ model: Category, attributes: ['name', 'icon'], required: false }] },
                 { model: Wallet, attributes: ['name', 'icon'] },
+                { model: TransactionLink, as: 'transactionLink', required: false, include: [{ model: Wallet, as: 'toWallet', attributes: ['id', 'name', 'icon'], required: false }] },
                 { model: TransactionSplit, include: [
                     { model: User, as: 'debtor', attributes: ['id', 'name', 'email'], required: false },
                     { model: SplitInvitation, attributes: ['id', 'email', 'status'], required: false }
@@ -212,6 +215,7 @@ async function getTransactionsList(req, res) {
                 type: t.type,
                 source: t.source,
                 isDuplicate: t.isDuplicate,
+                excludeFromBudget: t.excludeFromBudget,
                 categoryId: t.categoryId,
                 walletId: t.walletId,
                 categoryName: t.userCategory?.customName || t.userCategory?.Category?.name || t.Category?.name || null,
@@ -220,6 +224,13 @@ async function getTransactionsList(req, res) {
                 userCategoryId: t.userCategoryId || null,
                 walletName: t.Wallet?.name,
                 walletIcon: t.Wallet?.icon,
+                transactionLink: t.transactionLink ? {
+                    linkType: t.transactionLink.linkType,
+                    toWalletId: t.transactionLink.toWalletId,
+                    toWalletName: t.transactionLink.toWallet?.name || null,
+                    toWalletIcon: t.transactionLink.toWallet?.icon || null,
+                    debtId: t.transactionLink.debtId,
+                } : null,
                 TransactionSplits: (t.TransactionSplits || []).map(s => ({
                     id: s.id,
                     userId: s.userId,
@@ -232,8 +243,10 @@ async function getTransactionsList(req, res) {
             });
 
             const amt = parseFloat(t.amount || 0);
-            if (t.type === 'expense') group.dayTotal -= amt;
-            else group.dayTotal += amt;
+            if (!t.excludeFromBudget) {
+                if (t.type === 'expense') group.dayTotal -= amt;
+                else if (t.type === 'income') group.dayTotal += amt;
+            }
         });
 
         return res.json({

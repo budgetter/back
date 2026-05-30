@@ -1,4 +1,4 @@
-const { Transaction, RecurrentPayment, TransactionSplit, User, SplitInvitation, RecurrentSplitConfig, FriendContact } = require('../models');
+const { Transaction, RecurrentPayment, TransactionSplit, User, SplitInvitation, RecurrentSplitConfig, FriendContact, TransactionLink, Wallet, Debt } = require('../models');
 const recurrentService = require('../functions/recurrentService');
 const { v4: uuidv4 } = require('uuid');
 
@@ -17,7 +17,10 @@ async function createTransaction(req, res) {
     recurrentPaymentId,
     walletId,
     frequency,
-    splits, // Array of { userId?, email?, amount?, splitMode? }
+    toWalletId,
+    debtId,
+    excludeFromBudget,
+    splits,
     splitMode: requestSplitMode
   } = req.body;
 
@@ -25,10 +28,23 @@ async function createTransaction(req, res) {
     return res.status(400).json({ message: 'Missing required fields: amount or type' });
   }
 
+  // Transfer validation
+  if (type === 'transfer') {
+    if (!walletId || !toWalletId) {
+      return res.status(400).json({ message: 'Transfer requires both source and destination wallets' });
+    }
+    if (walletId === toWalletId) {
+      return res.status(400).json({ message: 'Source and destination wallets must be different' });
+    }
+  }
+
   const splitMode = requestSplitMode || 'even';
 
   try {
     const transactionDate = date || new Date().toISOString().split('T')[0];
+
+    // For transfers, default excludeFromBudget to true unless explicitly set
+    const shouldExclude = excludeFromBudget !== undefined ? excludeFromBudget : (type === 'transfer');
 
     const transaction = await Transaction.create({
       id: uuidv4(),
@@ -42,7 +58,46 @@ async function createTransaction(req, res) {
       GroupId: GroupId || null,
       recurrentPaymentId: recurrentPaymentId || null,
       walletId: walletId || null,
+      excludeFromBudget: shouldExclude,
     });
+
+    // Handle transfer: create link + adjust wallet balances
+    if (type === 'transfer' && toWalletId) {
+      await TransactionLink.create({
+        id: uuidv4(),
+        transactionId: transaction.id,
+        linkType: 'transfer',
+        toWalletId,
+      });
+
+      // Adjust wallet balances
+      const fromWallet = await Wallet.findByPk(walletId);
+      const toWallet = await Wallet.findByPk(toWalletId);
+      if (fromWallet) {
+        fromWallet.balance = parseFloat(fromWallet.balance) - parseFloat(amount);
+        await fromWallet.save();
+      }
+      if (toWallet) {
+        toWallet.balance = parseFloat(toWallet.balance) + parseFloat(amount);
+        await toWallet.save();
+      }
+    }
+
+    // Handle debt payment: create link + reduce debt
+    if (debtId && type === 'expense') {
+      await TransactionLink.create({
+        id: uuidv4(),
+        transactionId: transaction.id,
+        linkType: 'debt_payment',
+        debtId,
+      });
+
+      const debt = await Debt.findByPk(debtId);
+      if (debt) {
+        debt.totalDebt = parseFloat(debt.totalDebt) - parseFloat(amount);
+        await debt.save();
+      }
+    }
 
     // Handle Splits
     if (splits && Array.isArray(splits) && splits.length > 0) {
@@ -239,23 +294,77 @@ async function getTransactions(req, res) {
  */
 async function updateTransaction(req, res) {
   const { transactionId } = req.params;
-  const { splits, splitMode: requestSplitMode, TransactionSplits, ...updateData } = req.body;
+  const { splits, splitMode: requestSplitMode, TransactionSplits, toWalletId, debtId, ...updateData } = req.body;
   const splitMode = requestSplitMode || 'even';
 
   try {
     const transaction = await Transaction.findByPk(transactionId);
     if (!transaction) return res.status(404).json({ message: 'Transaction not found' });
 
-    // Update transaction fields (exclude split-related keys)
+    // Transfer validation
+    if (updateData.type === 'transfer') {
+      const fromWallet = updateData.walletId || transaction.walletId;
+      if (!fromWallet || !toWalletId) {
+        return res.status(400).json({ message: 'Transfer requires both source and destination wallets' });
+      }
+      if (fromWallet === toWalletId) {
+        return res.status(400).json({ message: 'Source and destination wallets must be different' });
+      }
+    }
+
+    // Reverse existing link effects before updating
+    const existingLink = await TransactionLink.findOne({ where: { transactionId } });
+    if (existingLink) {
+      const oldAmount = parseFloat(transaction.amount);
+      if (existingLink.linkType === 'transfer') {
+        // Reverse wallet adjustments
+        const fromWallet = await Wallet.findByPk(transaction.walletId);
+        const oldToWallet = await Wallet.findByPk(existingLink.toWalletId);
+        if (fromWallet) { fromWallet.balance = parseFloat(fromWallet.balance) + oldAmount; await fromWallet.save(); }
+        if (oldToWallet) { oldToWallet.balance = parseFloat(oldToWallet.balance) - oldAmount; await oldToWallet.save(); }
+      } else if (existingLink.linkType === 'debt_payment') {
+        // Reverse debt reduction
+        const debt = await Debt.findByPk(existingLink.debtId);
+        if (debt) { debt.totalDebt = parseFloat(debt.totalDebt) + oldAmount; await debt.save(); }
+      }
+      await existingLink.destroy();
+    }
+
+    // Update transaction fields
     const fkFields = ['categoryId', 'userCategoryId', 'walletId'];
-    const safeFields = ['amount', 'description', 'date', 'type', 'categoryId', 'userCategoryId', 'walletId', 'frequency'];
+    const safeFields = ['amount', 'description', 'date', 'type', 'categoryId', 'userCategoryId', 'walletId', 'frequency', 'excludeFromBudget'];
     for (const field of safeFields) {
       if (updateData[field] !== undefined) {
-        // Coerce empty strings to null for FK fields only
         transaction[field] = fkFields.includes(field) ? (updateData[field] || null) : updateData[field];
       }
     }
     await transaction.save();
+
+    // Apply new link effects
+    const newType = transaction.type;
+    const newAmount = parseFloat(transaction.amount);
+
+    if (newType === 'transfer' && toWalletId) {
+      await TransactionLink.create({
+        id: uuidv4(),
+        transactionId,
+        linkType: 'transfer',
+        toWalletId,
+      });
+      const fromWallet = await Wallet.findByPk(transaction.walletId);
+      const toWallet = await Wallet.findByPk(toWalletId);
+      if (fromWallet) { fromWallet.balance = parseFloat(fromWallet.balance) - newAmount; await fromWallet.save(); }
+      if (toWallet) { toWallet.balance = parseFloat(toWallet.balance) + newAmount; await toWallet.save(); }
+    } else if (debtId && newType === 'expense') {
+      await TransactionLink.create({
+        id: uuidv4(),
+        transactionId,
+        linkType: 'debt_payment',
+        debtId,
+      });
+      const debt = await Debt.findByPk(debtId);
+      if (debt) { debt.totalDebt = parseFloat(debt.totalDebt) - newAmount; await debt.save(); }
+    }
 
     // Handle splits update if splits array is provided
     if (splits !== undefined) {
@@ -375,6 +484,22 @@ async function deleteTransaction(req, res) {
   try {
     const transaction = await Transaction.findByPk(transactionId);
     if (!transaction) return res.status(404).json({ message: 'Transaction not found' });
+
+    // Reverse link effects before deleting
+    const link = await TransactionLink.findOne({ where: { transactionId } });
+    if (link) {
+      const amount = parseFloat(transaction.amount);
+      if (link.linkType === 'transfer') {
+        const fromWallet = await Wallet.findByPk(transaction.walletId);
+        const toWallet = await Wallet.findByPk(link.toWalletId);
+        if (fromWallet) { fromWallet.balance = parseFloat(fromWallet.balance) + amount; await fromWallet.save(); }
+        if (toWallet) { toWallet.balance = parseFloat(toWallet.balance) - amount; await toWallet.save(); }
+      } else if (link.linkType === 'debt_payment') {
+        const debt = await Debt.findByPk(link.debtId);
+        if (debt) { debt.totalDebt = parseFloat(debt.totalDebt) + amount; await debt.save(); }
+      }
+    }
+
     await transaction.destroy();
     return res.json({ message: 'Transaction deleted successfully' });
   } catch (error) {

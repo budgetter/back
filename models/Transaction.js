@@ -20,8 +20,13 @@ const Transaction = sequelize.define('Transaction', {
     defaultValue: DataTypes.NOW,
   },
   type: {
-    type: DataTypes.ENUM('expense', 'income'),
+    type: DataTypes.ENUM('expense', 'income', 'transfer'),
     allowNull: false,
+  },
+  excludeFromBudget: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
   },
   walletId: {
     type: DataTypes.UUID,

@@ -350,6 +350,7 @@ async function getRemainingBudget(req, res) {
       date: {
         [Op.between]: [startDate, endDate],
       },
+      excludeFromBudget: { [Op.ne]: true },
     };
 
     if (budget.ownerType === 'Group') {
