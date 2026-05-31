@@ -7,7 +7,7 @@ describe("Budget API Endpoints", () => {
   let transaction;
 
   beforeAll(async () => {
-    await sequelize.sync({ force: true });
+    await sequelize.sync();
 
     // Register a test user via API to trigger hooks and side effects
     const registerRes = await request(app).post("/api/auth/register").send({

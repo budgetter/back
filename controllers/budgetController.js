@@ -548,7 +548,7 @@ async function getRemainingBudget(req, res) {
         debtCategories.push({
           id: `debt-${debt.id}`,
           debtId: debt.id,
-          name: debt.bankName,
+          name: debt.bankName || `Debt #${debt.creditNumber || debt.id.slice(0, 6)}`,
           icon: '🏦',
           color1: '#ef4444',
           plannedAmount: planned,

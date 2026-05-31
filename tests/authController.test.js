@@ -5,7 +5,7 @@ const sequelize = require("../config/database");
 describe("Auth API Endpoints", () => {
   let transaction;
   beforeAll(async () => {
-    await sequelize.sync({ force: true });
+    await sequelize.sync();
   });
 
   beforeEach(async () => {

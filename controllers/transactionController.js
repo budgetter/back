@@ -94,7 +94,8 @@ async function createTransaction(req, res) {
 
       const debt = await Debt.findByPk(debtId);
       if (debt) {
-        debt.totalDebt = parseFloat(debt.totalDebt) - parseFloat(amount);
+        const amt = parseFloat(amount);
+        debt.totalDebt = parseFloat(debt.totalDebt) - amt;
         await debt.save();
       }
     }
@@ -325,7 +326,10 @@ async function updateTransaction(req, res) {
       } else if (existingLink.linkType === 'debt_payment') {
         // Reverse debt reduction
         const debt = await Debt.findByPk(existingLink.debtId);
-        if (debt) { debt.totalDebt = parseFloat(debt.totalDebt) + oldAmount; await debt.save(); }
+        if (debt) {
+          debt.totalDebt = parseFloat(debt.totalDebt) + oldAmount;
+          await debt.save();
+        }
       }
       await existingLink.destroy();
     }
@@ -363,7 +367,10 @@ async function updateTransaction(req, res) {
         debtId,
       });
       const debt = await Debt.findByPk(debtId);
-      if (debt) { debt.totalDebt = parseFloat(debt.totalDebt) - newAmount; await debt.save(); }
+      if (debt) {
+        debt.totalDebt = parseFloat(debt.totalDebt) - newAmount;
+        await debt.save();
+      }
     }
 
     // Handle splits update if splits array is provided
@@ -496,7 +503,10 @@ async function deleteTransaction(req, res) {
         if (toWallet) { toWallet.balance = parseFloat(toWallet.balance) - amount; await toWallet.save(); }
       } else if (link.linkType === 'debt_payment') {
         const debt = await Debt.findByPk(link.debtId);
-        if (debt) { debt.totalDebt = parseFloat(debt.totalDebt) + amount; await debt.save(); }
+        if (debt) {
+          debt.totalDebt = parseFloat(debt.totalDebt) + amount;
+          await debt.save();
+        }
       }
     }
 

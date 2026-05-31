@@ -39,7 +39,19 @@ const Debt = sequelize.define(
     },
     userId: {
       type: DataTypes.UUID,
-      allowNull: false,
+      allowNull: true,
+    },
+    categoryId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+    groupId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+    userCategoryId: {
+      type: DataTypes.UUID,
+      allowNull: true,
     },
     paymentDay: {
       type: DataTypes.INTEGER,
