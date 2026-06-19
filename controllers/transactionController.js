@@ -129,7 +129,7 @@ async function createTransaction(req, res) {
         resolvedParticipants.push({
           userId: participantUserId,
           email: participantEmail,
-          amount: split.amount || null,
+          amount: split.amount !== undefined && split.amount !== null ? parseFloat(split.amount) : null,
         });
       }
 
@@ -402,7 +402,7 @@ async function updateTransaction(req, res) {
           resolvedParticipants.push({
             userId: participantUserId,
             email: participantEmail,
-            amount: split.amount || null,
+            amount: split.amount !== undefined && split.amount !== null ? parseFloat(split.amount) : null,
           });
         }
 
