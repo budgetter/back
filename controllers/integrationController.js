@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const { google } = require("googleapis");
 const passport = require("passport");
-const { BankIntegration, IntegrationMap, ProcessedEmail, Transaction, Wallet, Category, OAuthNonce, sequelize } = require("../models");
+const { BankIntegration, IntegrationMap, ProcessedEmail, Transaction, Wallet, Category, OAuthNonce, SplitInvitation, TransactionSplit, sequelize } = require("../models");
 const GmailService = require("../services/gmailService");
 const BankParsers = require("../parsers/BankParsers");
 const { v4: uuidv4 } = require('uuid');
@@ -467,7 +467,13 @@ async function resetProcessedEmails(req, res) {
                 if (fromDate) txWhere.date[Op.gte] = fromDate;
                 if (toDate) txWhere.date[Op.lte] = toDate;
             }
-            txDeleted = await Transaction.destroy({ where: txWhere });
+            // Find transaction IDs first, then delete dependent rows
+            const txIds = (await Transaction.findAll({ where: txWhere, attributes: ['id'], raw: true })).map(t => t.id);
+            if (txIds.length > 0) {
+                await SplitInvitation.destroy({ where: { transactionId: txIds } });
+                await TransactionSplit.destroy({ where: { transactionId: txIds } });
+                txDeleted = await Transaction.destroy({ where: { id: txIds } });
+            }
         }
 
         // Clear lastSync so next sync uses syncDaysBack

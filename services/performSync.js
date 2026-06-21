@@ -96,10 +96,10 @@ async function performSync(integration, userId, timeBudgetMs = 8000) {
     allMessages = allMessages.filter(m => { if (seen.has(m.id)) return false; seen.add(m.id); return true; });
     const total = allMessages.length;
 
-    // Step 2: Pre-filter already processed (check by messageId since unique constraint is on messageId)
+    // Step 2: Pre-filter already processed for THIS integration
     const messageIds = allMessages.map(m => m.id);
     const processedRows = await ProcessedEmail.findAll({
-      where: { messageId: messageIds },
+      where: { integrationId: integration.id, messageId: messageIds },
       attributes: ['messageId'], raw: true,
     });
     const processedSet = new Set(processedRows.map(p => p.messageId));

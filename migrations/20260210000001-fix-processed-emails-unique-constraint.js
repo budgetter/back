@@ -37,6 +37,15 @@ module.exports = {
         });
 
         if (!hasCompositeUnique) {
+            // Remove duplicates before adding unique constraint
+            await queryInterface.sequelize.query(`
+                DELETE pe1 FROM ProcessedEmails pe1
+                INNER JOIN ProcessedEmails pe2
+                WHERE pe1.id > pe2.id
+                  AND pe1.integrationId = pe2.integrationId
+                  AND pe1.messageId = pe2.messageId
+            `);
+
             await queryInterface.addIndex('ProcessedEmails', ['integrationId', 'messageId'], {
                 unique: true,
                 name: 'unique_processed_email'
