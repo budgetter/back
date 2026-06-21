@@ -193,15 +193,16 @@ async function getSettings(req, res) {
 
 async function updateSettings(req, res) {
     try {
-        const { maps } = req.body; // Array of { bankParameter, walletId, defaultCategoryId }
-        const integration = await BankIntegration.findOne({ where: { userId: req.user.id, provider: 'Gmail', isActive: true } });
+        const { maps, integrationId } = req.body; // Array of { bankParameter, walletId, defaultCategoryId }
+
+        let integration;
+        if (integrationId) {
+            integration = await BankIntegration.findOne({ where: { id: integrationId, userId: req.user.id, provider: 'Gmail', isActive: true } });
+        } else {
+            integration = await BankIntegration.findOne({ where: { userId: req.user.id, provider: 'Gmail', isActive: true } });
+        }
 
         if (!integration) return res.status(404).json({ message: "Integration not found" });
-
-        // Defense-in-depth: explicit ownership check
-        if (integration.userId !== req.user.id) {
-            return res.status(403).json({ message: "Forbidden" });
-        }
 
         // Upsert maps
         for (const map of maps) {
