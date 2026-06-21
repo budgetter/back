@@ -12,7 +12,12 @@ router.delete('/contacts/:contactId', authenticateToken, splitController.removeC
 
 // Debts
 router.get('/debts/summary', authenticateToken, splitController.getDebtsSummary);
+router.get('/debts/email/:email', authenticateToken, splitController.getDebtsWithEmail);
 router.get('/debts/:userId', authenticateToken, splitController.getDebtsWithUser);
+
+// Batch operations
+router.post('/batch-settle', authenticateToken, splitController.batchSettle);
+router.post('/link-payment', authenticateToken, splitController.linkTransactionAsPayment);
 
 // Settlement
 router.post('/:splitId/settle', authenticateToken, splitController.settleSplit);

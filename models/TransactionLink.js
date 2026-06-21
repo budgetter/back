@@ -13,7 +13,7 @@ const TransactionLink = sequelize.define('TransactionLink', {
     unique: true,
   },
   linkType: {
-    type: DataTypes.ENUM('transfer', 'debt_payment'),
+    type: DataTypes.ENUM('transfer', 'debt_payment', 'split_payment'),
     allowNull: false,
   },
   toWalletId: {

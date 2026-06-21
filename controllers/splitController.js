@@ -1,4 +1,4 @@
-const { FriendContact, User, TransactionSplit, Transaction, SplitInvitation, RecurrentPayment, RecurrentSplitConfig, sequelize } = require("../models");
+const { FriendContact, User, TransactionSplit, Transaction, SplitInvitation, RecurrentPayment, RecurrentSplitConfig, TransactionLink, SplitPaymentLink, sequelize } = require("../models");
 const { Op, fn, col, literal } = require("sequelize");
 const { v4: uuidv4 } = require("uuid");
 
@@ -302,13 +302,6 @@ async function getDebtsSummary(req, res) {
 
     // Combine registered + invitation-based debts owed to me
     const owedToMeFormatted = [
-      ...(owedToMeRegistered || []).map((row) => ({
-        userId: row.userId,
-        name: row.name,
-        email: row.email,
-        totalAmount: parseFloat(row.totalAmount),
-        type: 'registered',
-      })),
       ...(owedToMeInvitations || []).map((row) => ({
         userId: null,
         name: null,
@@ -318,12 +311,34 @@ async function getDebtsSummary(req, res) {
       })),
     ];
 
-    const owedByMeFormatted = (owedByMe || []).map((row) => ({
-      userId: row.creditorUserId,
-      name: row.name,
-      email: row.email,
-      totalAmount: parseFloat(row.totalAmount),
-    }));
+    const owedByMeFormatted = [];
+
+    // Net reconciliation: cross-reference registered debts by userId
+    const toMeMap = new Map();
+    for (const row of (owedToMeRegistered || [])) {
+      toMeMap.set(row.userId, { ...row, totalAmount: parseFloat(row.totalAmount) });
+    }
+    const byMeMap = new Map();
+    for (const row of (owedByMe || [])) {
+      byMeMap.set(row.creditorUserId, { ...row, totalAmount: parseFloat(row.totalAmount) });
+    }
+
+    const allCounterpartyIds = new Set([...toMeMap.keys(), ...byMeMap.keys()]);
+    for (const cpId of allCounterpartyIds) {
+      const toMe = toMeMap.get(cpId);
+      const byMe = byMeMap.get(cpId);
+      const toMeAmt = toMe ? toMe.totalAmount : 0;
+      const byMeAmt = byMe ? byMe.totalAmount : 0;
+      const net = toMeAmt - byMeAmt;
+      const info = toMe || byMe;
+
+      if (net > 0) {
+        owedToMeFormatted.push({ userId: cpId, name: info.name, email: info.email, totalAmount: parseFloat(net.toFixed(2)), type: 'registered' });
+      } else if (net < 0) {
+        owedByMeFormatted.push({ userId: cpId, name: info.name, email: info.email, totalAmount: parseFloat(Math.abs(net).toFixed(2)) });
+      }
+      // net === 0: omit from both
+    }
 
     return res.json({ owedToMe: owedToMeFormatted, owedByMe: owedByMeFormatted });
   } catch (error) {
@@ -340,35 +355,34 @@ async function getDebtsWithUser(req, res) {
   try {
     const currentUserId = req.user.id;
     const { userId } = req.params;
+    const { startDate, endDate } = req.query;
 
-    // Direction 1: Current user owns transaction, other user is debtor
+    const dateFilter = {};
+    if (startDate) dateFilter[Op.gte] = startDate;
+    if (endDate) dateFilter[Op.lte] = endDate;
+    const transactionWhere1 = { UserId: currentUserId };
+    const transactionWhere2 = { UserId: userId };
+    if (startDate || endDate) {
+      transactionWhere1.date = dateFilter;
+      transactionWhere2.date = dateFilter;
+    }
+
     const owedToMe = await TransactionSplit.findAll({
-      include: [
-        {
-          model: Transaction,
-          attributes: ["id", "description", "amount", "date"],
-          where: { UserId: currentUserId },
-        },
-      ],
-      where: {
-        userId: userId,
-        isPaid: false,
-      },
+      include: [{
+        model: Transaction,
+        attributes: ["id", "description", "amount", "date"],
+        where: transactionWhere1,
+      }],
+      where: { userId: userId, isPaid: false },
     });
 
-    // Direction 2: Other user owns transaction, current user is debtor
     const owedByMe = await TransactionSplit.findAll({
-      include: [
-        {
-          model: Transaction,
-          attributes: ["id", "description", "amount", "date"],
-          where: { UserId: userId },
-        },
-      ],
-      where: {
-        userId: currentUserId,
-        isPaid: false,
-      },
+      include: [{
+        model: Transaction,
+        attributes: ["id", "description", "amount", "date"],
+        where: transactionWhere2,
+      }],
+      where: { userId: currentUserId, isPaid: false },
     });
 
     return res.json({ owedToMe, owedByMe });
@@ -582,6 +596,153 @@ async function updateRecurrentSplitConfig(req, res) {
   }
 }
 
+/**
+ * Get debts with an email-based (invitation) contact.
+ */
+async function getDebtsWithEmail(req, res) {
+  try {
+    const currentUserId = req.user.id;
+    const { email } = req.params;
+    const { startDate, endDate } = req.query;
+
+    let dateClause = '';
+    const replacements = { currentUserId, email };
+    if (startDate) { dateClause += ' AND t.date >= :startDate'; replacements.startDate = startDate; }
+    if (endDate) { dateClause += ' AND t.date <= :endDate'; replacements.endDate = endDate; }
+
+    const owedToMe = await sequelize.query(`
+      SELECT si.id, si.email, si.amount, si.status, t.id AS transactionId, t.description, t.amount AS transactionAmount, t.date
+      FROM split_invitations si
+      INNER JOIN transactions t ON si.transactionId = t.id
+      WHERE si.invitedBy = :currentUserId
+        AND si.email = :email
+        AND si.status = 'pending'${dateClause}
+    `, { replacements, type: sequelize.QueryTypes.SELECT });
+
+    return res.json({ owedToMe });
+  } catch (error) {
+    console.error("Error fetching debts with email:", error);
+    return res.status(500).json({ message: "Server error while fetching debts with email" });
+  }
+}
+
+/**
+ * Batch settle multiple splits atomically.
+ */
+async function batchSettle(req, res) {
+  const { splitIds, proofOfPayment } = req.body;
+
+  if (!splitIds || !Array.isArray(splitIds) || splitIds.length === 0) {
+    return res.status(400).json({ message: "splitIds array is required" });
+  }
+
+  try {
+    const result = await sequelize.transaction(async (t) => {
+      const splits = await TransactionSplit.findAll({
+        where: { id: splitIds },
+        include: [{ model: Transaction, attributes: ["id", "UserId"] }],
+        transaction: t,
+      });
+
+      if (splits.length !== splitIds.length) {
+        throw { status: 400, message: "One or more splits not found" };
+      }
+
+      // Verify authorization for each split
+      for (const split of splits) {
+        const isDebtor = req.user.id === split.userId;
+        const isCreditor = req.user.id === split.Transaction.UserId;
+        if (!isDebtor && !isCreditor) {
+          throw { status: 403, message: "Not authorized to settle one or more splits" };
+        }
+      }
+
+      const now = new Date();
+      for (const split of splits) {
+        split.isPaid = true;
+        split.paidAt = now;
+        if (proofOfPayment) split.proofOfPayment = proofOfPayment;
+        await split.save({ transaction: t });
+      }
+
+      return splits;
+    });
+
+    return res.json({ message: "Splits settled successfully", settledCount: result.length });
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ message: error.message });
+    console.error("Error batch settling:", error);
+    return res.status(500).json({ message: "Server error while batch settling" });
+  }
+}
+
+/**
+ * Link a transaction as payment for outstanding splits.
+ */
+async function linkTransactionAsPayment(req, res) {
+  const { transactionId, splitAllocations } = req.body;
+
+  if (!transactionId || !splitAllocations || !splitAllocations.length) {
+    return res.status(400).json({ message: "transactionId and splitAllocations are required" });
+  }
+
+  try {
+    const result = await sequelize.transaction(async (t) => {
+      const transaction = await Transaction.findByPk(transactionId, { transaction: t });
+      if (!transaction || transaction.UserId !== req.user.id) {
+        throw { status: 403, message: "Transaction not found or not authorized" };
+      }
+
+      const totalAllocation = splitAllocations.reduce((sum, a) => sum + a.amount, 0);
+      if (totalAllocation > parseFloat(transaction.amount)) {
+        throw { status: 400, message: "Allocations exceed transaction amount" };
+      }
+
+      // Create TransactionLink
+      const link = await TransactionLink.create({
+        id: uuidv4(),
+        transactionId,
+        linkType: 'split_payment',
+      }, { transaction: t });
+
+      // Process each allocation
+      for (const alloc of splitAllocations) {
+        const split = await TransactionSplit.findByPk(alloc.splitId, { transaction: t });
+        if (!split || split.isPaid) {
+          throw { status: 400, message: `Split ${alloc.splitId} not found or already paid` };
+        }
+
+        await SplitPaymentLink.create({
+          id: uuidv4(),
+          transactionLinkId: link.id,
+          splitId: alloc.splitId,
+          amount: alloc.amount,
+        }, { transaction: t });
+
+        // Mark split as paid if fully covered
+        const totalPaid = await SplitPaymentLink.sum('amount', {
+          where: { splitId: alloc.splitId },
+          transaction: t,
+        }) || 0;
+
+        if (totalPaid >= parseFloat(split.amount)) {
+          split.isPaid = true;
+          split.paidAt = new Date();
+          await split.save({ transaction: t });
+        }
+      }
+
+      return link;
+    });
+
+    return res.json({ message: "Transaction linked as payment", linkId: result.id });
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ message: error.message });
+    console.error("Error linking transaction as payment:", error);
+    return res.status(500).json({ message: "Server error while linking payment" });
+  }
+}
+
 module.exports = {
   getContacts,
   addContact,
@@ -590,7 +751,10 @@ module.exports = {
   searchContacts,
   getDebtsSummary,
   getDebtsWithUser,
+  getDebtsWithEmail,
   settleSplit,
+  batchSettle,
+  linkTransactionAsPayment,
   cancelInvitation,
   updateRecurrentSplitConfig,
 };

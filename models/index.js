@@ -28,6 +28,7 @@ const SyncHistory = require("./SyncHistory");
 const PushSubscription = require("./PushSubscription");
 const UserCategory = require("./UserCategory");
 const TransactionLink = require("./TransactionLink");
+const SplitPaymentLink = require("./SplitPaymentLink");
 
 /* 
    Users and Groups are linked via UserGroup, which includes a Role.
@@ -194,6 +195,12 @@ TransactionLink.belongsTo(Transaction, { foreignKey: 'transactionId' });
 TransactionLink.belongsTo(Wallet, { foreignKey: 'toWalletId', as: 'toWallet' });
 TransactionLink.belongsTo(Debt, { foreignKey: 'debtId' });
 
+// SplitPaymentLink associations
+SplitPaymentLink.belongsTo(TransactionLink, { foreignKey: 'transactionLinkId' });
+TransactionLink.hasMany(SplitPaymentLink, { foreignKey: 'transactionLinkId' });
+SplitPaymentLink.belongsTo(TransactionSplit, { foreignKey: 'splitId' });
+TransactionSplit.hasMany(SplitPaymentLink, { foreignKey: 'splitId' });
+
 module.exports = {
   sequelize,
   User,
@@ -225,4 +232,5 @@ module.exports = {
   PushSubscription,
   UserCategory,
   TransactionLink,
+  SplitPaymentLink,
 };
