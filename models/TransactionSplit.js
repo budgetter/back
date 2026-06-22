@@ -31,7 +31,7 @@ const TransactionSplit = sequelize.define(
             allowNull: true,
         },
         proofOfPayment: {
-            type: DataTypes.STRING,
+            type: DataTypes.TEXT('medium'),
             allowNull: true,
         },
         splitMode: {

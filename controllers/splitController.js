@@ -427,6 +427,14 @@ async function settleSplit(req, res) {
 
     await split.save();
 
+    // If this is an invitation-based split, mark the invitation as resolved
+    if (split.invitationId) {
+      await SplitInvitation.update(
+        { status: 'resolved', resolvedAt: new Date() },
+        { where: { id: split.invitationId } }
+      );
+    }
+
     // Check if all splits for this transaction are now settled
     const unsettledCount = await TransactionSplit.count({
       where: {
@@ -611,12 +619,14 @@ async function getDebtsWithEmail(req, res) {
     if (endDate) { dateClause += ' AND t.date <= :endDate'; replacements.endDate = endDate; }
 
     const owedToMe = await sequelize.query(`
-      SELECT si.id, si.email, si.amount, si.status, t.id AS transactionId, t.description, t.amount AS transactionAmount, t.date
+      SELECT ts.id, si.email, si.amount, si.status, t.id AS transactionId, t.description, t.amount AS transactionAmount, t.date
       FROM split_invitations si
       INNER JOIN transactions t ON si.transactionId = t.id
+      INNER JOIN transaction_splits ts ON ts.invitationId = si.id
       WHERE si.invitedBy = :currentUserId
         AND si.email = :email
-        AND si.status = 'pending'${dateClause}
+        AND si.status = 'pending'
+        AND ts.isPaid = false${dateClause}
     `, { replacements, type: sequelize.QueryTypes.SELECT });
 
     return res.json({ owedToMe });
@@ -663,6 +673,13 @@ async function batchSettle(req, res) {
         split.paidAt = now;
         if (proofOfPayment) split.proofOfPayment = proofOfPayment;
         await split.save({ transaction: t });
+
+        if (split.invitationId) {
+          await SplitInvitation.update(
+            { status: 'resolved', resolvedAt: now },
+            { where: { id: split.invitationId }, transaction: t }
+          );
+        }
       }
 
       return splits;
