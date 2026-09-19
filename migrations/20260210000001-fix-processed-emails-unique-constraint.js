@@ -56,6 +56,7 @@ module.exports = {
     down: async (queryInterface, Sequelize) => {
         // Reverse: remove composite unique and add back single-column unique on messageId
         const indexes = await queryInterface.showIndex('ProcessedEmails');
+
         const compositeIndex = indexes.find(index => {
             const cols = Array.isArray(index.fields)
                 ? index.fields.map(f => (typeof f === 'string' ? f : f.attribute || f.name))
@@ -68,14 +69,40 @@ module.exports = {
             );
         });
 
+        // integrationId has a FK constraint (references BankIntegrations), and the
+        // composite unique index above is the only index covering it. InnoDB
+        // refuses to drop an index that's the sole support for a FK, so add a
+        // plain index on integrationId first to keep the FK satisfied. Exclude
+        // the composite index itself from this check — it's about to be dropped.
+        const hasOtherIntegrationIdIndex = indexes.some(index => {
+            if (compositeIndex && index.name === compositeIndex.name) return false;
+            const cols = Array.isArray(index.fields)
+                ? index.fields.map(f => (typeof f === 'string' ? f : f.attribute || f.name))
+                : [];
+            return cols[0] === 'integrationId';
+        });
+        if (!hasOtherIntegrationIdIndex) {
+            await queryInterface.addIndex('ProcessedEmails', ['integrationId'], {
+                name: 'processed_emails_integration_id_idx'
+            });
+        }
+
         if (compositeIndex) {
             await queryInterface.removeIndex('ProcessedEmails', compositeIndex.name);
         }
 
         // Re-add single-column unique on messageId
-        await queryInterface.addIndex('ProcessedEmails', ['messageId'], {
-            unique: true,
-            name: 'unique_message_id'
+        const hasMessageIdUnique = indexes.some(index => {
+            const cols = Array.isArray(index.fields)
+                ? index.fields.map(f => (typeof f === 'string' ? f : f.attribute || f.name))
+                : [];
+            return index.unique && cols.length === 1 && cols[0] === 'messageId';
         });
+        if (!hasMessageIdUnique) {
+            await queryInterface.addIndex('ProcessedEmails', ['messageId'], {
+                unique: true,
+                name: 'unique_message_id'
+            });
+        }
     }
 };

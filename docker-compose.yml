@@ -1,0 +1,42 @@
+services:
+  db:
+    image: mysql:8
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASS}
+      MYSQL_DATABASE: ${DB_NAME}
+    volumes:
+      - budgetter_db_data:/var/lib/mysql
+    healthcheck:
+      # --protocol=tcp is required: the official image briefly runs an
+      # internal "temporary server" (socket-only, no TCP listener) while it
+      # runs first-boot init scripts. A socket/localhost ping succeeds
+      # against that temporary server, marking the container healthy before
+      # the real server (bound to TCP 3306) is actually up.
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--protocol=tcp", "-uroot", "-p${DB_PASS}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Override whatever back/.env points at (a cloud DB, another local
+      # instance, etc.) so the container always talks to the `db` service
+      # above, as root, which is guaranteed to exist and have DB_NAME created.
+      DB_HOST: db
+      DB_USER: root
+      NODE_ENV: production
+      PORT: 3000
+    ports:
+      - "3000:3000"
+
+volumes:
+  budgetter_db_data:
