@@ -7,7 +7,7 @@
     "build": "echo Building Functions",
     "test": "jest --runInBand",
     "migrate": "npx sequelize-cli db:migrate",
-    "seed": "node back/scripts/runSeeder.js"
+    "seed": "node scripts/runSeeder.js"
   },
   "dependencies": {
     "@netlify/functions": "^5.2.2",
